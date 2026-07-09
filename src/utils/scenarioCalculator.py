@@ -4,6 +4,7 @@ import pandas as pd
 import src.utils.state as state
 from src.utils.config import GlobalConfig
 from src.utils.models import Scenario
+from src.utils.scenarios import Scenarios
 
 L = 2  # length of latent period in weeks
 D = 1  # length of infectious period in weeks
@@ -66,31 +67,6 @@ class ScenarioCalculator:
 
         state.BASELINE_SCENARIO.I = i_model
         state.BASELINE_SCENARIO.compute_i_series()
-        weekly_i_model = pd.Series(np.sum(i_model, axis=0), index=state.AGE_STRUCTURED_DATA_INDEX)
-        #state.BASELINE_SCENARIO.weekly_i_model = weekly_i_model
-        state.set_i_baseline(weekly_i_model)
-        state.set_i_baseline_mtx(i_model)
-        
-    # @staticmethod
-    # def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float):
-    #     scenario = init_scenario(scenario_name)
-    #     for t in range(GlobalConfig.MAX_TAU, state.NR_TIMESTEPS - 1):
-    #         calculate_next_step_for_scenario(scenario, vacc_level, t)
-    #     return update_scenario(scenario)
-
-    # @staticmethod
-    # def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float, year_offset: int):
-    #     start_of_vaccination = GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=year_offset)
-    #     scenario = init_scenario(scenario_name)
-    #     calculate_the_number_of_vaccinated_individuals(year_offset, scenario.V1)
-    #     for t in range(0, state.NR_TIMESTEPS - 1):
-    #         if state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination:
-    #             scenario.I[:, t] = state.CASES_MATRIX[:, t]
-    #             scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t]
-    #
-    #     for t in range(GlobalConfig.MAX_TAU, state.NR_TIMESTEPS - 1):
-    #         if state.WEEKLY_CASES_FILLED.index[t] > start_of_vaccination:
-    #             calculate_next_step_for_scenario(scenario, vacc_level, t)
 
 def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float, year_offset: int) -> Scenario:
     start_of_vaccination = GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=year_offset)
@@ -103,16 +79,15 @@ def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float
 
     for t in range(GlobalConfig.MAX_TAU, state.NR_TIMESTEPS - 1):
         if state.WEEKLY_CASES_FILLED.index[t] > start_of_vaccination:
-            calculate_next_step_for_scenario(scenario, vacc_level, t)
+            calculate_next_step_for_scenario(scenario, t)
     scenario.compute_i_series()
-    # update_scenario(scenario)
     return scenario
 
 
 def init_baseline_scenario():
     s_scen = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     s_scen[:, 0] = state.S0_VECTOR
-    return Scenario("baseline_scenario", S=s_scen, V1=state.WEEKLY_V1_AGE_STRUCTURED, V2=state.WEEKLY_V2_AGE_STRUCTURED)
+    return Scenario(Scenarios.BASELINE, S=s_scen, V1=state.WEEKLY_V1_AGE_STRUCTURED, V2=state.WEEKLY_V2_AGE_STRUCTURED)
 
 def init_scenario(scenario_name: str) -> Scenario:
     s_scen = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
@@ -209,16 +184,6 @@ def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool
 
 
 def handle_aging_of_infectious_cases(i_scen: np.ndarray, t: int):
-    A = state.NR_AGE_GROUPS
-    # age group 20+
-    # i_scen[A - 1, t] = i_scen[A - 1, t] + i_scen[A - 2, t] / 10
-    # # age group 15-19
-    # i_scen[A - 2, t] = i_scen[A - 2, t] * 9 / 10 + i_scen[A - 3, t] / 10
-    # # age group 10-14
-    # i_scen[A - 3, t] = i_scen[A - 3, t] * 9 / 10 + i_scen[A - 4, t]
-    # # age groups 1-9
-    # for a in range(A - 4, 0, -1):
-    #     i_scen[a, t] = i_scen[a - 1, t]
     i_scen[0, t] = 0
 
 
@@ -237,10 +202,7 @@ def calculate_simetrized_contact_matrix(t: int) -> np.ndarray:
     return (state.CONTACTS0 * population_i + state.CONTACTS0.T * population_j) / (2 * population_i)
 
 
-def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenario,
-                                                                vacc_level: float, t: int) -> np.ndarray:
-    # effectively_vaccinated_v1 = state.WEEKLY_V1_AGE_STRUCTURED[:, t - 1] * GlobalConfig.V1_EFFICACY * vacc_level
-    # effectively_vaccinated_v2 = state.WEEKLY_V2_AGE_STRUCTURED[:, t - 1] * GlobalConfig.V2_EFFICACY * vacc_level
+def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenario, t: int) -> np.ndarray:
     effectively_vaccinated_v1 = scenario.V1[:, t - 1] * GlobalConfig.V1_EFFICACY
     effectively_vaccinated_v2 = scenario.V2[:, t - 1] * GlobalConfig.V2_EFFICACY
     effectively_vaccinated = effectively_vaccinated_v1 + effectively_vaccinated_v2
@@ -262,12 +224,11 @@ def calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario: Sc
     denominator = calculate_denominator(scenario.I, t)
     return r_t_scen * denominator
 
-def calculate_next_step_for_scenario(scenario: Scenario, vacc_level, t: int):
-    scenario.S[:, t] = calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario, vacc_level, t)
+def calculate_next_step_for_scenario(scenario: Scenario, t: int):
+    scenario.S[:, t] = calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario, t)
     if is_time_for_aging(t) & (state.WEEKLY_CASES_FILLED.index[t] > GlobalConfig.START_OF_VACCINATION): handle_aging_of_susceptible_cases(scenario.S, t, False)
     scenario.I[:, t] = calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario, t)
     if is_time_for_aging(t) : handle_aging_of_infectious_cases(scenario.I, t)
-    #update_scenario_when_aging(scenario, t, False)
 
 
 def calculate_the_number_of_vaccinated_individuals_with_negative_offset(year_offset: int, vacc_level: float, vacc1: np.ndarray):
@@ -278,17 +239,10 @@ def calculate_the_number_of_vaccinated_individuals_with_negative_offset(year_off
     for date in state.WEEKLY_INDEX:
         if date < start_of_vacc:
             v1_weekly.loc[date] = 0
-            # v2_weekly.loc[date] = 0
-        # elif date < start_of_vacc + pd.DateOffset(months=3) :
-        # v1_weekly.loc[date] = weekly_births.asof(date + pd.DateOffset(months=-13)) * 0.99
-        # v2_weekly.loc[date] = 0
         elif date < GlobalConfig.START_OF_VACCINATION:
             v1_weekly.loc[date] = state.WEEKLY_BIRTH_SERIES.asof(date + pd.DateOffset(months=-13)) * 0.99 * vacc_level
-            # v2_weekly.loc[date] = weekly_births.asof(date + pd.DateOffset(months=-16)) * 0.99
         else:
             v1_weekly.loc[date] = state.WEEKLY_V1.loc[date] * vacc_level
-            # v2_weekly.loc[date] = weekly_v2.loc[date]
-
         vacc1[1, :] = v1_weekly.values
 
 def calculate_the_number_of_vaccinated_individuals(year_offset: int, vacc_level: float, vacc1: np.ndarray):

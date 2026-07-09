@@ -25,9 +25,7 @@ def plot_remainders():
         s_t = state.BASELINE_SCENARIO.S[:, t] / state.POPULATION[:, t]
         r_t[t] = (state.REMAINDERS[:, t] * s_t).sum()
 
-    # weekly_remainders_t = pd.Series(np.sum(N,axis=0), index=age_structured_data_index)
     weekly_remainders_t = pd.Series(r_t, index=state.AGE_STRUCTURED_DATA_INDEX)
-    weekly_Rt = pd.Series(r_t, index=state.AGE_STRUCTURED_DATA_INDEX)
 
     plt.figure(figsize=(12, 6))
     weekly_remainders_t.plot()
@@ -49,7 +47,6 @@ def plot_model_actual_scat_comparison(scenario: Scenario):
 
     plt.scatter(
         state.AGE_STRUCTURED_DATA_INDEX,
-        #weekly_cases_filled[age_structured_data_mask].values,
         np.sum(state.CASES_MATRIX, axis=0)[:len(model)],
         color="black",
         s=4,
@@ -64,7 +61,8 @@ def plot_model_actual_scat_comparison(scenario: Scenario):
     plt.tight_layout()
     plt.show()
 
-def plot_annual_cases(annual_infections_scen):
+def plot_annual_cases(scenario: Scenario):
+    annual_infections_scen = scenario.annual_i_series
     fig, ax = plt.subplots()
     ax.plot(annual_infections_scen.index, annual_infections_scen)
 
@@ -74,8 +72,6 @@ def plot_annual_cases(annual_infections_scen):
 
     ax.grid(alpha=0.3)
 
-    # plt.plot(annual_infections_scen0)
-
     plt.scatter(
         annual_infections_scen.index,
         annual_infections_scen,
@@ -84,20 +80,20 @@ def plot_annual_cases(annual_infections_scen):
         label="Observed data"
     )
 
-    plt.title("Annual cases")
-    # plt.xlabel("Date")
+    plt.title("Annual cases: " + scenario.name)
+    plt.xlabel("Date")
     plt.ylabel("Annual number of cases")
     plt.tight_layout()
     plt.show()
 
-def plot_model_results_age_range_in_range(model, min_age: int, max_age: int):
+def plot_model_results_age_range_in_range(model, min_age: int, max_age: int, scenario_name: str):
     plt.figure(figsize=(10, 2))
 
     for a in range(min_age, max_age + 1):
         plt.plot(state.AGE_STRUCTURED_DATA_INDEX, pd.Series(model[a], index=state.AGE_STRUCTURED_DATA_INDEX).values,
-             label=a, linewidth=1)
+             label=state.AGE_GROUPS[a], linewidth=1)
 
-    plt.title("Estimated cases")
+    plt.title("Estimated cases: " + scenario_name)
     plt.xlabel("Date")
     plt.ylabel("Weekly number of cases")
     plt.grid(alpha=0.3)
@@ -110,7 +106,7 @@ def plot_scat_age_range_in_range(model, index, min_age: int, max_age: int, actua
 
     for a in range(min_age, max_age):
         plt.plot(index, pd.Series(model[a], index=index).values,
-                 label=a, linewidth=1)
+                 label=state.AGE_GROUPS[a], linewidth=1)
         plt.scatter(
             index, actual_case_matrix[a][date_mask], s=4
         )
@@ -141,16 +137,9 @@ def plot_compare_scenario_to_actual_case(scen: pd.Series, scenario_name: str):
         annual_infections_scen,
         color="royalblue",
         s=6,
-        label="Estimated data: " + scenario_name
+        label="Estimated data"
     )
 
-    #ax.plot(state.ANNUAL_CASES.index, state.ANNUAL_CASES)
-    # plt.scatter(
-    #     state.ANNUAL_CASES.index,
-    #     state.ANNUAL_CASES,
-    #     s=4,
-    #     label="Observed data"
-    # )
     ax.plot(state.BASELINE_SCENARIO.annual_i_series.index, state.BASELINE_SCENARIO.annual_i_series, color="orange", linewidth=1)
     plt.scatter(
         state.BASELINE_SCENARIO.annual_i_series.index,
@@ -160,7 +149,7 @@ def plot_compare_scenario_to_actual_case(scen: pd.Series, scenario_name: str):
         label="Observed data"
     )
 
-    plt.title("Compare annual cases")
+    plt.title("Compare annual cases: " + scenario_name)
     plt.xlabel("Date")
     plt.ylabel("Annual number of cases")
     plt.grid(alpha=0.3)
@@ -168,18 +157,16 @@ def plot_compare_scenario_to_actual_case(scen: pd.Series, scenario_name: str):
     plt.legend()
     plt.show()
 
-#%%
 def plot_compare_scenario_to_actual_case_for_age_groups(scen: np.ndarray, min_age: int, max_age: int, scenario_name: str):
     cases_df = pd.DataFrame(scen.T, index=state.WEEKLY_INDEX)
     annual_cases = cases_df.groupby(cases_df.index.year).sum()
     annual_cases.index = pd.to_datetime(annual_cases.index.astype(str))
-    #for a in range(min_age, max_age+1):
-    #    annual_cases.index = pd.to_datetime(annual_cases.index, format="%Y")
 
     fig, ax = plt.subplots()
 
     for a in range(min_age, max_age + 1):
-        ax.plot(annual_cases.index, pd.Series(annual_cases[a], index=annual_cases.index).values, label=a, linewidth=1)
+        ax.plot(annual_cases.index, pd.Series(annual_cases[a], index=annual_cases.index).values,
+                label=state.AGE_GROUPS[a], linewidth=1)
 
     # Annual grids and titles
     ax.xaxis.set_major_locator(mdates.YearLocator(3))        # each year
@@ -187,15 +174,7 @@ def plot_compare_scenario_to_actual_case_for_age_groups(scen: np.ndarray, min_ag
 
     ax.grid(alpha=0.3)
 
-    # plt.scatter(
-    #     annual_cases.index,
-    #     annual_cases,
-    #     color="black",
-    #     s=4,
-    #     label="Observed data"
-    # )
-
-    plt.title("Annual cases in scenario \"" + scenario_name + "\"")
+    plt.title("Annual cases: " + scenario_name)
     plt.xlabel("Date")
     plt.ylabel("Annual number of cases")
     plt.grid(alpha=0.3)
@@ -223,7 +202,7 @@ def plot_heatmap(dataframe: pd.DataFrame, title: str):
     ax.set_yticks(np.arange(len(state.AGE_GROUPS)))
     ax.set_yticklabels(state.AGE_GROUPS)
 
-    # Időtengely ritkítása
+    # reducing the frequency of grids
     ax.set_xticks(np.linspace(0, len(state.WEEKLY_INDEX)-1, 10).astype(int))
     ax.set_xticklabels(
         [state.WEEKLY_INDEX[i].strftime("%Y-%m-%d") for i in np.linspace(0, len(state.WEEKLY_INDEX)-1, 10).astype(int)],
@@ -247,14 +226,34 @@ def plot_cumulative_cases(scenarios: list[Scenario], index, mask):
         cum = scenario.I.sum(axis=0).cumsum()
         ax.plot(index, cum[mask], label = scenario.name)
         ax.fill_between(index, cum[mask], alpha=0.5)
-        #ax.fill_between(index, cum[mask], alpha=0.5)
 
-    # Éves beosztás
+    # annual grids
     ax.xaxis.set_major_locator(mdates.YearLocator(1))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
 
     ax.grid(alpha=0.3)
     ax.set_title(f"Cumulative I")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Cumulative count")
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+def plot_cumulative_i_and_v(scenario: Scenario):
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    i_cum = scenario.I.sum(axis=0).cumsum()
+    v_cum = scenario.V1.sum(axis=0).cumsum()
+
+    ax.plot(state.WEEKLY_INDEX, i_cum, label="Infected (cum)", color="red")
+    ax.plot(state.WEEKLY_INDEX, v_cum, label="Vaccinated (cum)", color="green")
+
+    # annual grids
+    ax.xaxis.set_major_locator(mdates.YearLocator(1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+    ax.grid(alpha=0.3)
+    ax.set_title(f"Cumulative I and V")
     ax.set_xlabel("Date")
     ax.set_ylabel("Cumulative count")
     ax.legend()

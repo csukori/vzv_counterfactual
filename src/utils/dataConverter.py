@@ -6,8 +6,8 @@ import numpy as np
 from src.utils.config import GlobalConfig
 import src.utils.state as state
 
-DETECTION_RATE_BEFORE = 0.4
-DETECTION_RATE_AFTER = 0.4
+DETECTION_RATE_BEFORE: float = 0.4
+DETECTION_RATE_AFTER: float = 0.4
 
 def convert_df_cases_to_weekly_cases(df_cases: DataFrame) -> Series | DataFrame:
     # "2020_1" → split year and week
@@ -28,10 +28,10 @@ def convert_df_cases_to_weekly_cases(df_cases: DataFrame) -> Series | DataFrame:
     weekly_cases.loc[weekly_cases.index >= GlobalConfig.START_OF_VACCINATION] *= 1 / DETECTION_RATE_AFTER
     return weekly_cases
 
-def create_full_index_date_range(max) -> DatetimeIndex:
+def create_full_index_date_range(max_date) -> DatetimeIndex:
     return pd.date_range(
         start=GlobalConfig.START_OF_AGE_STRUCTURED_DATE,
-        end=max,
+        end=max_date,
         freq="W-MON"
     )
 
@@ -49,14 +49,12 @@ def create_case_matrix(annual_cases, weekly_cases_filled, weekly_cases_full) -> 
     weekly_age_structured = {}
 
     for age in state.AGE_GROUPS:
-        # weekly_age_structured[age] = {}
         s = pd.Series(np.zeros(len(weekly_cases_full.index), dtype=float), index=weekly_cases_full.index)
         for year in state.YEARS:
             annual_value = annual_cases.loc[age, year] * (1 / DETECTION_RATE_BEFORE)
             props = weekly_proportions_for_year(weekly_cases_filled, year)
             mask = weekly_cases_filled.index.year == year
             s.loc[mask] = props * annual_value
-            # weekly_age_structured[age][year] = props * annual_value
         weekly_age_structured[age] = s
 
     return np.column_stack(
@@ -103,7 +101,7 @@ def convert_annual_v1_data_to_weekly_v1(df_vaccines: DataFrame) -> Series:
         if date < GlobalConfig.START_OF_VACCINATION:
             weekly_v1.loc[date] = 0
         elif (date >= GlobalConfig.START_OF_VACCINATION) & (date < pd.Timestamp("2020-01-01")):
-            weekly_v1.loc[date] = v1_yearly[year] / (52 - GlobalConfig.START_OF_VACCINATION.weekofyear)
+            weekly_v1.loc[date] = v1_yearly[year] / (52 - GlobalConfig.START_OF_VACCINATION.week)
         else:
             weekly_v1.loc[date] = v1_yearly[year] / 52
     return weekly_v1
@@ -127,7 +125,6 @@ def convert_annual_birth_data_to_birth_mtx(df_births: DataFrame) -> ndarray:
     for date in state.WEEKLY_INDEX:
         year = date.year
         weekly_births.loc[date] = births_yearly[year] / 52
-        # weekly_births.loc[date] = births_yearly[year] * birth_rates[date.weekofyear]
     birth_mtx = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     birth_mtx[0, :] = weekly_births
     state.set_weekly_births(weekly_births)
@@ -206,8 +203,8 @@ def convert_data_to_n0(df_population: DataFrame) -> ndarray:
         .str.replace("–", "-", regex=False)
     )
     df_population.iloc[:, 1] = pd.to_numeric(df_population.iloc[:, 1], errors="coerce")
-    df_N0 = df_population.set_index(df_population.columns[0])
-    return df_N0.iloc[:, 0].values.astype(float)
+    df_n0 = df_population.set_index(df_population.columns[0])
+    return df_n0.iloc[:, 0].values.astype(float)
 
 def convert_data_to_contact_matrix(df_contacts: DataFrame) -> ndarray:
     df_contacts.index = (

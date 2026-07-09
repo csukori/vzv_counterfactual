@@ -29,11 +29,8 @@ class Scenario:
         self.compute_i_series()
 
     def compute_i_series(self):
-        # weekly_i_series: egyszerűen pandas Series az I-ből
         self.weekly_i_series = pd.Series(np.sum(self.I, axis=0), index=state.AGE_STRUCTURED_DATA_INDEX)
 
-        # annual_i_series: 52 hetes összevonás
-        # (ha más logika kell, ide rakod)
         self.annual_i_series = (
             self.weekly_i_series
             .groupby(self.weekly_i_series.index.year)

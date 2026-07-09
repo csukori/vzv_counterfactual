@@ -8,50 +8,47 @@ from src.utils.config import GlobalConfig
 
 # --- Imported data ---
 WEEKLY_CASES: pd.Series | None = None
-FULL_INDEX = None
-WEEKLY_CASES_FULL = None
-WEEKLY_CASES_FILLED = None
-BEFORE_VACCINATION_MASK = None
-WITH_VACCINATION_MASK = None
-CASES_MATRIX = None
-GLOBAL_MIN = None
-GLOBAL_MAX = None
+FULL_INDEX: pd.DatetimeIndex | None = None
+WEEKLY_CASES_FULL: pd.Series | None = None
+WEEKLY_CASES_FILLED: pd.Series | None = None
+BEFORE_VACCINATION_MASK: np.ndarray[bool] | None = None
+WITH_VACCINATION_MASK: np.ndarray[bool] | None = None
+CASES_MATRIX: np.ndarray[float] | None = None
+GLOBAL_MIN: float | None = None
+GLOBAL_MAX: float | None = None
 
 ANNUAL_CASES: pd.Series | None = None
 
-AGE_STRUCTURED_DATA_MASK = None     # mask that helps to work with data relevant only in time period where we have age structured data
-AGE_STRUCTURED_DATA_INDEX = None    # the date indices of data relevant only in time period where we have age structured data
+# mask that helps to work with data relevant only in time period where we have age structured data
+AGE_STRUCTURED_DATA_MASK: np.ndarray[bool] | None = None
+# the date indices of data relevant only in time period where we have age structured data
+AGE_STRUCTURED_DATA_INDEX: pd.DatetimeIndex | None = None
 
-DEATHS_MATRIX = None
+DEATHS_MATRIX: np.ndarray[float] | None = None
 
-BIRTH_MATRIX = None
+BIRTH_MATRIX: np.ndarray[float] | None = None
 WEEKLY_BIRTH_SERIES: pd.Series | None = None
-WEEKLY_V1 = None        # weekly number of vaccinated infants (1st dose)
-WEEKLY_V2 = None        # weekly number of vaccinated infants (2nd dose)
-WEEKLY_V1_AGE_STRUCTURED = None     # weekly age structured number of vaccinated individuals (1st dose)
-WEEKLY_V2_AGE_STRUCTURED = None     # weekly age structured number of vaccinated individuals (2nd dose)
+WEEKLY_V1: np.ndarray[float] | None = None        # weekly number of vaccinated infants (1st dose)
+WEEKLY_V2: np.ndarray[float] | None = None        # weekly number of vaccinated infants (2nd dose)
+WEEKLY_V1_AGE_STRUCTURED: np.ndarray[float] | None = None     # weekly age structured number of vaccinated individuals (1st dose)
+WEEKLY_V2_AGE_STRUCTURED: np.ndarray[float] | None = None     # weekly age structured number of vaccinated individuals (2nd dose)
 
-S0_VECTOR = None
-N0_VECTOR = None
-CONTACTS0 = None
+S0_VECTOR: np.ndarray[float] | None = None
+N0_VECTOR: np.ndarray[float] | None = None
+CONTACTS0: np.ndarray[float] | None = None
 
 # --- Baseline model results (kezdetben None) ---
 
 BASELINE_SCENARIO: Scenario | None = None
-S_BASELINE = None     # number of susceptible individuals (A×T)
-I_BASELINE = None     # number of infectious individuals (A×T)
-I_BASELINE_MTX: np.ndarray | None = None     # number of infectious individuals (A×T)
-INCIDENCE_BASELINE = None  # weekly number of new cases (A×T)
-I_BASELINE_ANNUAL = None
-POPULATION = None     # age structured population (A×T)
-REMAINDERS = None
-R_A = None
-RHO = None
+POPULATION: np.ndarray[float] | None = None     # age structured population (A×T)
+REMAINDERS: np.ndarray[float] | None = None
+R_A: np.ndarray[float] | None = None
+RHO: np.ndarray[float] | None = None
 
 WEEKLY_INDEX: pd.Series | None = None   # time index (T = NR_TIMESTEPS)
-AGE_GROUPS = None     # list of age groups (A = NR_AGE_GROUPS)
+AGE_GROUPS: np.ndarray[str] | None = None     # list of age groups (A = NR_AGE_GROUPS)
 NR_AGE_GROUPS: int | None = None
-YEARS = None
+YEARS: np.ndarray[int] | None = None
 NR_TIMESTEPS: int | None = None
 AFTER_2016_1_1_MASK: bool | None = None
 AFTER_2015_1_1_MASK: bool | None = None
@@ -142,8 +139,6 @@ def set_weekly_v2_age_structured():
         raise ValueError("WEEKLY_V2 has not been initialized")
     global WEEKLY_V2_AGE_STRUCTURED
     WEEKLY_V2_AGE_STRUCTURED = np.zeros((NR_AGE_GROUPS, NR_TIMESTEPS))
-    # WEEKLY_V2_AGE_STRUCTURED[1,:] = WEEKLY_V2
-
 
 def set_weekly_v2(weekly_v2):
     global WEEKLY_V2
@@ -167,25 +162,9 @@ def set_baseline_scenario(scenario):
     global BASELINE_SCENARIO
     BASELINE_SCENARIO = scenario
 
-def set_s_baseline(s_baseline):
-    global S_BASELINE
-    S_BASELINE = s_baseline
-
 def set_population(population):
     global POPULATION
     POPULATION = population
-
-def set_i_baseline(i_baseline):
-    global I_BASELINE
-    I_BASELINE = i_baseline
-
-def set_i_baseline_mtx(i_baseline_mtx):
-    global I_BASE_MATRIX
-    I_BASE_MATRIX = i_baseline_mtx
-
-def set_i_baseline_annual(i_annual):
-    global I_BASELINE_ANNUAL
-    I_BASELINE_ANNUAL = i_annual
 
 def set_remainders(remainders):
     global REMAINDERS
