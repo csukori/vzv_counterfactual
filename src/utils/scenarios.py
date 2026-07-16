@@ -12,3 +12,5 @@ class Scenarios(StrEnum):
     STARTING_5_YEAR_MINUS = "Starting 5 year earlier"
     STARTING_8_YEAR_MINUS = "Starting 8 year earlier"
     STARTING_13_YEAR_MINUS = "Starting 13 year earlier"
+    NO_COVID = "No COVID"
+    NO_COV_NO_VACC = "No COVID and no vaccination"

@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.dates as mdates
 from numpy import ndarray
+from matplotlib.dates import RRuleLocator, rrulewrapper
+from dateutil.rrule import YEARLY
 
 import src.utils.state as state
 from src.utils.config import GlobalConfig
@@ -92,6 +94,12 @@ def plot_model_results_age_range_in_range(model, min_age: int, max_age: int, sce
     for a in range(min_age, max_age + 1):
         plt.plot(state.AGE_STRUCTURED_DATA_INDEX, pd.Series(model[a], index=state.AGE_STRUCTURED_DATA_INDEX).values,
              label=state.AGE_GROUPS[a], linewidth=1)
+
+    ax = plt.gca()
+    ax.set_xlim(state.AGE_STRUCTURED_DATA_INDEX.min(), state.AGE_STRUCTURED_DATA_INDEX.max())
+    rule = rrulewrapper(YEARLY, interval=2, bymonth=9, bymonthday=1)
+    ax.xaxis.set_major_locator(RRuleLocator(rule))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
 
     plt.title("Estimated cases: " + scenario_name)
     plt.xlabel("Date")

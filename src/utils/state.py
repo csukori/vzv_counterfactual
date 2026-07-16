@@ -53,6 +53,13 @@ NR_TIMESTEPS: int | None = None
 AFTER_2016_1_1_MASK: bool | None = None
 AFTER_2015_1_1_MASK: bool | None = None
 
+NO_COVID_REMAINDERS: np.ndarray[float] | None = None
+NO_COVID_BIRTHS: np.ndarray[float] | None = None
+NO_COVID_DEATHS: np.ndarray[float] | None = None
+MEAN_I: np.ndarray[float] | None = None
+MEAN_REMAINDERS: np.ndarray[float] | None = None
+MEAN_I_SCENARIO: Scenario | None = None
+
 def set_age_groups_and_nr_age_groups(age_groups):
     global AGE_GROUPS, NR_AGE_GROUPS
     AGE_GROUPS = age_groups
@@ -177,3 +184,27 @@ def set_r_a(r_a):
 def set_rho(rho):
     global RHO
     RHO = rho
+
+def set_no_covid_remainders(no_covid_remainders):
+    global NO_COVID_REMAINDERS
+    NO_COVID_REMAINDERS = no_covid_remainders
+
+def set_no_covid_births(no_covid_births):
+    global NO_COVID_BIRTHS
+    NO_COVID_BIRTHS = no_covid_births
+
+def set_no_covid_deaths(no_covid_deaths):
+    global NO_COVID_DEATHS
+    NO_COVID_DEATHS = no_covid_deaths
+
+def set_mean_i(mean_i):
+    global MEAN_I
+    MEAN_I = mean_i
+
+def set_mean_remainders(mean_remainders):
+    global MEAN_REMAINDERS
+    MEAN_REMAINDERS = mean_remainders
+
+def set_mean_i_scenario(mean_i_scenario):
+    global MEAN_I_SCENARIO
+    MEAN_I_SCENARIO = mean_i_scenario

@@ -96,14 +96,24 @@ def create_weekly_death_matrix(annual_deaths: Series, index) -> ndarray:
 def convert_annual_v1_data_to_weekly_v1(df_vaccines: DataFrame) -> Series:
     v1_yearly = dict(zip(df_vaccines["Year"], df_vaccines["1st dose"]))
     weekly_v1 = pd.Series(index=state.WEEKLY_INDEX, dtype=float)
+    annual_birth_series = state.WEEKLY_BIRTH_SERIES.groupby(state.WEEKLY_BIRTH_SERIES.index.year).sum()
+    mask_2019_after_vaccination = ((GlobalConfig.START_OF_VACCINATION < state.WEEKLY_INDEX) &
+                                   (state.WEEKLY_INDEX <= pd.Timestamp('2019-12-31')))
+    births_in_2019_after_vaccination = (state.WEEKLY_BIRTH_SERIES[mask_2019_after_vaccination]
+                                        .groupby(state.WEEKLY_BIRTH_SERIES.index[mask_2019_after_vaccination].year).sum())
     for date in state.WEEKLY_INDEX:
         year = date.year
         if date < GlobalConfig.START_OF_VACCINATION:
             weekly_v1.loc[date] = 0
-        elif (date >= GlobalConfig.START_OF_VACCINATION) & (date < pd.Timestamp("2020-01-01")):
-            weekly_v1.loc[date] = v1_yearly[year] / (52 - GlobalConfig.START_OF_VACCINATION.week)
+        #elif (date >= GlobalConfig.START_OF_VACCINATION) & (date < pd.Timestamp("2020-01-01")):
+        #    weekly_v1.loc[date] = v1_yearly[year] / (52 - GlobalConfig.START_OF_VACCINATION.week)
         else:
-            weekly_v1.loc[date] = v1_yearly[year] / 52
+            target = date + pd.DateOffset(months=-13)
+            monday = target - pd.Timedelta(days=target.weekday())
+            total_births = births_in_2019_after_vaccination[date.year] if date.year == 2019 else annual_birth_series.loc[date.year]
+            birth_prop = state.WEEKLY_BIRTH_SERIES.loc[monday] / total_births
+            weekly_v1.loc[date] = v1_yearly[year] * birth_prop
+            # weekly_v1.loc[date] = v1_yearly[year] / 52
     return weekly_v1
 
 def convert_annual_v2_data_to_weekly_v2(df_vaccines: DataFrame) -> Series:
