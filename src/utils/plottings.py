@@ -63,6 +63,22 @@ def plot_model_actual_scat_comparison(scenario: Scenario):
     plt.tight_layout()
     plt.show()
 
+def plot_all_susceptibles(scenario: Scenario):
+    prop = np.sum(scenario.S[:state.NR_AGE_GROUPS-1,:], axis=0) / np.sum(state.POPULATION[:state.NR_AGE_GROUPS-1,:], axis=0)
+    model = pd.Series(prop, index=state.AGE_STRUCTURED_DATA_INDEX)
+    plt.figure(figsize=(10, 5))
+
+    plt.plot(model.index, model.values,
+             label="Estimated number of susceptibles", color="royalblue", linewidth=1)
+
+    plt.title("Number of susceptibles: " + scenario.name)
+    plt.xlabel("Date")
+    plt.ylabel("Weekly number of susceptibles")
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 def plot_annual_cases(scenario: Scenario):
     annual_infections_scen = scenario.annual_i_series
     fig, ax = plt.subplots()
@@ -247,14 +263,15 @@ def plot_cumulative_cases(scenarios: list[Scenario], index, mask):
     plt.tight_layout()
     plt.show()
 
-def plot_cumulative_i_and_v(scenario: Scenario):
+def plot_cumulative_i_and_v(scenario: Scenario, starting_date):
+    mask = state.WEEKLY_INDEX > starting_date
     fig, ax = plt.subplots(figsize=(10, 5))
 
     i_cum = scenario.I.sum(axis=0).cumsum()
     v_cum = scenario.V1.sum(axis=0).cumsum()
 
-    ax.plot(state.WEEKLY_INDEX, i_cum, label="Infected (cum)", color="red")
-    ax.plot(state.WEEKLY_INDEX, v_cum, label="Vaccinated (cum)", color="green")
+    ax.plot(state.WEEKLY_INDEX[mask], i_cum[mask], label="Infected (cum)", color="red")
+    ax.plot(state.WEEKLY_INDEX[mask], v_cum[mask], label="Vaccinated (cum)", color="green")
 
     # annual grids
     ax.xaxis.set_major_locator(mdates.YearLocator(1))

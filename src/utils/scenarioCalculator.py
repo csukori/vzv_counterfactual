@@ -122,16 +122,15 @@ def calculate_number_of_incidences_based_on_remainders():
     state.BASELINE_SCENARIO.I = i_model
     state.BASELINE_SCENARIO.compute_i_series()
 
-def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float, year_offset: int, with_covid: bool) -> Scenario:
-    start_of_vaccination = GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=year_offset)
+def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float, start_of_vaccination: pd.Timestamp, with_covid: bool) -> Scenario:
     scenario = init_scenario(scenario_name)
-    calculate_the_number_of_vaccinated_individuals(year_offset, vacc_level, scenario.V1)
+    calculate_the_number_of_vaccinated_individuals(start_of_vaccination, vacc_level, scenario.V1)
     for t in range(0, state.NR_TIMESTEPS - 1):
         if state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination:
             scenario.I[:, t] = state.CASES_MATRIX[:, t]
             scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t]
 
-    for t in range(GlobalConfig.MAX_TAU, state.NR_TIMESTEPS - 1):
+    for t in range(GlobalConfig.MAX_TAU, state.NR_TIMESTEPS):
         if state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination:
             calculate_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
     scenario.compute_i_series()
@@ -165,36 +164,35 @@ def calculate_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int
     if with_covid: calculate_size_of_population_in_next_step(t)
 
 def calculate_size_of_population_in_next_step(t: int):
-    is_not_the_first_monday_of_september = not ((state.WEEKLY_CASES_FILLED.index[t + 1].month == 9) &
-                                    (state.WEEKLY_CASES_FILLED.index[t + 1].day <= 7))
+    is_not_the_first_monday_of_september = not ((state.WEEKLY_CASES_FILLED.index[t].month == 9) &
+                                    (state.WEEKLY_CASES_FILLED.index[t].day <= 7))
     if (t <= state.NR_TIMESTEPS - 1) & is_not_the_first_monday_of_september:
         state.POPULATION[:, t] = state.POPULATION[:, t - 1] + state.BIRTH_MATRIX[:, t - 1] - state.DEATHS_MATRIX[:, t - 1]
 
 
 def calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int):
-    effectively_vaccinated_v1 = scenario.V1[:, t-1] * GlobalConfig.V1_EFFICACY if with_covid else np.zeros(state.NR_AGE_GROUPS)
-    effectively_vaccinated_v2 = scenario.V2[:, t-1] * GlobalConfig.V2_EFFICACY if with_covid else np.zeros(state.NR_AGE_GROUPS)
+    # effectively_vaccinated_v1 = scenario.V1[:, t-1] * GlobalConfig.V1_EFFICACY if with_covid else np.zeros(state.NR_AGE_GROUPS)
+    effectively_vaccinated_v1 = scenario.V1[:, t-1] * GlobalConfig.V1_EFFICACY
+    effectively_vaccinated_v2 = scenario.V2[:, t-1] * GlobalConfig.V2_EFFICACY
+    # effectively_vaccinated_v2 = scenario.V2[:, t-1] * GlobalConfig.V2_EFFICACY if with_covid else np.zeros(state.NR_AGE_GROUPS)
     effectively_vaccinated = effectively_vaccinated_v1 + effectively_vaccinated_v2
     cases_matrix = state.CASES_MATRIX[:, t-1] if with_covid else state.MEAN_I[:, t-1]
     births = state.BIRTH_MATRIX[:, t-1] if with_covid else state.NO_COVID_BIRTHS[:,t-1]
     deaths = state.DEATHS_MATRIX[:, t-1] if with_covid else state.NO_COVID_DEATHS[:,t-1]
-    print(t)
     demographic_changes = (births - deaths * (scenario.S[:, t-1] / state.POPULATION[:, t - 1]))
     scenario.S[:, t] = (scenario.S[:, t - 1] - cases_matrix - effectively_vaccinated + demographic_changes)
 
 
 def update_scenario_when_aging(scenario: Scenario, t: int, baseline: bool, with_covid: bool):
-    is_first_monday_of_september = ((state.WEEKLY_CASES_FILLED.index[t + 1].month == 9) &
-                                    (state.WEEKLY_CASES_FILLED.index[t + 1].day <= 7))
-    if (t <= state.NR_TIMESTEPS - 1) & is_first_monday_of_september:
+    if is_time_for_aging(t):
         if baseline:
             handle_aging_baseline(scenario.S, t, with_covid)
         else:
             handle_aging(scenario.S, scenario.I, t)
 
 def is_time_for_aging(t: int) -> bool:
-    is_first_monday_of_september = ((state.WEEKLY_CASES_FILLED.index[t + 1].month == 9) &
-                                    (state.WEEKLY_CASES_FILLED.index[t + 1].day <= 7))
+    is_first_monday_of_september = ((state.WEEKLY_CASES_FILLED.index[t].month == 9) &
+                                    (state.WEEKLY_CASES_FILLED.index[t].day <= 7))
     return (t <= state.NR_TIMESTEPS - 1) & is_first_monday_of_september
 
 
@@ -289,13 +287,15 @@ def calculate_next_step_for_scenario(scenario: Scenario, with_covid: bool, start
     if is_time_for_aging(t) : handle_aging_of_infectious_cases(scenario.I, t)
 
 
-def calculate_the_number_of_vaccinated_individuals_with_negative_offset(year_offset: int, vacc_level: float, vacc1: np.ndarray):
-    start_of_vacc = GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=year_offset)
+def calculate_the_number_of_vaccinated_individuals_with_negative_offset(
+        start_of_vaccination: pd.Timestamp, vacc_level: float, vacc1: np.ndarray):
     # Empty series for the weekly data
     v1_weekly = pd.Series(index=state.WEEKLY_INDEX, dtype=float)
+    if start_of_vaccination + pd.DateOffset(months=-13) < state.WEEKLY_INDEX[0]:
+        print("number of vaccinated individuals can not be calculated before " + str(state.WEEKLY_INDEX[0] + pd.DateOffset(months=13)))
     # Filling
     for date in state.WEEKLY_INDEX:
-        if date < start_of_vacc:
+        if (date < start_of_vaccination) or (date + pd.DateOffset(months=-13) < pd.Timestamp(2005,1,3)):
             v1_weekly.loc[date] = 0
         elif date < GlobalConfig.START_OF_VACCINATION:
             v1_weekly.loc[date] = state.WEEKLY_BIRTH_SERIES.asof(date + pd.DateOffset(months=-13)) * 0.99 * vacc_level
@@ -303,8 +303,9 @@ def calculate_the_number_of_vaccinated_individuals_with_negative_offset(year_off
             v1_weekly.loc[date] = state.WEEKLY_V1.loc[date] * vacc_level
         vacc1[1, :] = v1_weekly.values
 
-def calculate_the_number_of_vaccinated_individuals(year_offset: int, vacc_level: float, vacc1: np.ndarray):
-    if year_offset <= 0: calculate_the_number_of_vaccinated_individuals_with_negative_offset(year_offset, vacc_level, vacc1)
+def calculate_the_number_of_vaccinated_individuals(start_of_vaccination: pd.Timestamp, vacc_level: float, vacc1: np.ndarray):
+    if start_of_vaccination <= GlobalConfig.START_OF_VACCINATION:
+        calculate_the_number_of_vaccinated_individuals_with_negative_offset(start_of_vaccination, vacc_level, vacc1)
 
 def calculate_mean_remainders():
     df_remainders = pd.DataFrame(state.REMAINDERS[:, 3:].T, index=state.WEEKLY_INDEX[3:], columns=state.AGE_GROUPS)
