@@ -11,6 +11,7 @@
 # %%
 import numpy as np
 import pandas as pd
+import math
 
 import src.utils.state as state
 from src.utils.config import GlobalConfig
@@ -64,6 +65,23 @@ V2_EFFICACY = 0.92
 
 # %%
 def calculate_number_of_susceptible_cases_in_baseline(with_covid: bool):
+    """
+    Compute the baseline scenario’s weekly susceptible counts.
+
+    Parameters
+    ----------
+    with_covid : bool
+        If True, the baseline scenario includes COVID dynamics.
+        If False, a counterfactual “no‑COVID” baseline is used.
+
+    Notes
+    -----
+    The function initializes the baseline scenario, sets the initial
+    population, and iteratively computes weekly susceptible counts
+    using infection data, vaccination effects, demographic changes,
+    and aging. The result forms the backbone of all subsequent
+    scenario comparisons.
+    """
     baseline_scenario: Scenario = init_baseline_scenario() if with_covid else init_scenario(Scenarios.NO_COVID_BASELINE)
     if with_covid:
         state.set_baseline_scenario(baseline_scenario)
@@ -104,10 +122,24 @@ def calculate_number_of_susceptible_cases_in_baseline(with_covid: bool):
 # is implemented as the variable **denominator**, which captures the full renewal contribution from all age groups and past infectiousness.
 
 # %%
-import math
-
-
 def calculate_remainders(baseline: bool):
+    """
+    Compute weekly remainder terms and related quantities.
+
+    Parameters
+    ----------
+    baseline : bool
+        If True, compute remainders for the baseline scenario.
+        If False, compute remainders for the mean‑incidence scenario.
+
+    Notes
+    -----
+    Remainders quantify the relationship between observed cases,
+    susceptibility, and past infections weighted by the generation
+    interval kernel. They are used to estimate age‑specific
+    transmission strength (rₐₜ) and the dominant eigenvalue ρₜ,
+    which reflects overall transmissibility.
+    """
     remainders_t = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     r_a_t = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     rho = np.zeros(state.NR_TIMESTEPS)
@@ -141,6 +173,16 @@ def calculate_remainders(baseline: bool):
 
 # %%
 def calculate_number_of_incidences_based_on_remainders():
+    """
+    Reconstruct weekly incidences using remainder terms.
+
+    Notes
+    -----
+    For early weeks (t < τ), observed case counts are used directly.
+    For later weeks, incidences are computed as rₐₜ multiplied by the
+    weighted sum of past infections. This produces a model‑consistent
+    incidence trajectory for the baseline scenario.
+    """
     A = state.NR_AGE_GROUPS
     T = state.NR_TIMESTEPS
     i_model = np.zeros((A, T))
@@ -169,6 +211,30 @@ def calculate_number_of_incidences_based_on_remainders():
 
 # %%
 def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float, start_of_vaccination: pd.Timestamp, with_covid: bool) -> Scenario:
+    """
+    Compute weekly susceptible and infectious cases for a given scenario.
+
+    Parameters
+    ----------
+    scenario_name : str
+        Name of the scenario (e.g., “Vaccination level 75%”).
+    vacc_level : float
+        Target vaccination coverage level.
+    start_of_vaccination : Timestamp
+        Date when vaccination begins in the scenario.
+    with_covid : bool
+        Whether COVID dynamics are included.
+
+    Notes
+    -----
+    The function:
+    - initializes the scenario,
+    - assigns vaccination counts,
+    - copies baseline values before vaccination starts,
+    - iteratively computes weekly S and I after vaccination begins.
+
+    The result is a fully populated Scenario object.
+    """
     scenario = init_scenario(scenario_name)
     calculate_the_number_of_vaccinated_individuals(start_of_vaccination, vacc_level, scenario.V1)
     for t in range(0, state.NR_TIMESTEPS - 1):
@@ -191,18 +257,30 @@ def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float
 
 # %%
 def init_baseline_scenario():
+    """
+    Initialize the baseline scenario with initial susceptible counts
+    and age‑structured vaccination matrices.
+
+    Notes
+    -----
+    The baseline scenario serves as the reference trajectory against
+    which all hypothetical scenarios are compared.
+    """
     s_scen = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     s_scen[:, 0] = state.S0_VECTOR
     return Scenario(Scenarios.BASELINE, S=s_scen, V1=state.WEEKLY_V1_AGE_STRUCTURED, V2=state.WEEKLY_V2_AGE_STRUCTURED)
 
-# %% [markdown]
-# This function initializes counterfactual scenarios with following parameters:
-# - name: scenario_name
-# - S (numer of susceptible individuals): the number of susceptible individuals in the baseline scenario in the first GlobalConfig.MAX_TAU timesteps, zeros afterward
-# - I (numer of new infections): the number of cases in the baseline scenario in the first GlobalConfig.MAX_TAU timesteps, zeros afterward
-
 # %%
 def init_scenario(scenario_name: str) -> Scenario:
+    """
+    Initialize a new scenario using baseline values for the first τ weeks.
+
+    Notes
+    -----
+    Early weeks use baseline S and I because the generation interval
+    kernel requires past incidence values. After initialization, the
+    scenario is ready for iterative updates.
+    """
     s_scen = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     i_scen = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     for t in range(0, math.ceil(GlobalConfig.MAX_TAU)):
@@ -210,30 +288,54 @@ def init_scenario(scenario_name: str) -> Scenario:
         s_scen[:, t] = state.BASELINE_SCENARIO.S[:, t]
     return Scenario(scenario_name, S=s_scen, I=i_scen)
 
-# %% [markdown]
-# This function calculates the number of susceptible individuals and new infections in the baseline scenarios at time $t$ base on the states before $t$. If the parameter **with_covid** is **true**, the actual baseline scenario is considered. If it is false, a counterfactual scenario is computed with the same vaccination level and start time, but as if no COVID‑19 pandemic had occurred.
-
 # %%
 def calculate_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int):
+    """
+    Compute susceptible counts, apply aging, and update population
+    for the baseline scenario at week t.
+
+    Notes
+    -----
+    This function performs one full model step:
+    - update susceptible counts,
+    - apply demographic aging,
+    - update population (if COVID dynamics are included).
+    """
     calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario, with_covid, t)
     update_scenario_when_aging(scenario, t, True, with_covid)
     if with_covid: calculate_size_of_population_in_next_step(t)
 
-# %% [markdown]
-# This function calculates the size of the population at time $t$.
-
 # %%
 def calculate_size_of_population_in_next_step(t: int):
+    """
+    Update the age‑structured population for week t.
+
+    Notes
+    -----
+    Population changes are applied weekly except during the first
+    Monday of September, when aging is handled separately. Births
+    and deaths are incorporated into each age group.
+    """
     is_not_the_first_monday_of_september = not ((state.WEEKLY_CASES_FILLED.index[t].month == 9) &
                                     (state.WEEKLY_CASES_FILLED.index[t].day <= 7))
     if (t <= state.NR_TIMESTEPS - 1) & is_not_the_first_monday_of_september:
         state.POPULATION[:, t] = state.POPULATION[:, t - 1] + state.BIRTH_MATRIX[:, t - 1] - state.DEATHS_MATRIX[:, t - 1]
 
-# %% [markdown]
-# This function calculates the number of susceptible individuals in the baseline scenarios. If the parameter **with_covid** is **true**, the actual baseline scenario is considered. If it is false, a counterfactual scenario is computed with the same vaccination level and start time, but as if no COVID‑19 pandemic had occurred.
-
 # %%
 def calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int):
+    """
+    Compute susceptible counts for week t in the baseline scenario.
+
+    Notes
+    -----
+    Susceptibles are updated using:
+    - infections,
+    - effective vaccination,
+    - births and deaths,
+    - demographic changes.
+
+    This forms the core recurrence relation for Sₜ.
+    """
     effectively_vaccinated_v1 = scenario.V1[:, t-1] * GlobalConfig.V1_EFFICACY
     effectively_vaccinated_v2 = scenario.V2[:, t-1] * GlobalConfig.V2_EFFICACY
     effectively_vaccinated = effectively_vaccinated_v1 + effectively_vaccinated_v2
@@ -250,30 +352,43 @@ def calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario: Sce
 
 # %%
 def update_scenario_when_aging(scenario: Scenario, t: int, baseline: bool, with_covid: bool):
+    """
+    Apply aging transitions at week t if it is the annual aging week.
+
+    Notes
+    -----
+    Aging redistributes individuals between age groups and ensures
+    demographic consistency. Baseline scenarios also update population.
+    """
     if is_time_for_aging(t):
         if baseline:
             handle_aging_baseline(scenario.S, t, with_covid)
         else:
             handle_aging(scenario.S, scenario.I, t)
 
+# %%
 def is_time_for_aging(t: int) -> bool:
+    """
+    Determine whether week t corresponds to the annual aging event.
+
+    Notes
+    -----
+    Aging occurs during the first Monday of September.
+    """
     is_first_monday_of_september = ((state.WEEKLY_CASES_FILLED.index[t].month == 9) &
                                     (state.WEEKLY_CASES_FILLED.index[t].day <= 7))
     return (t <= state.NR_TIMESTEPS - 1) & is_first_monday_of_september
 
-# %% [markdown]
-# This function updates the susceptible and infectious compartments at time $t$ (if it is the first Monday of September) according to the above described aging process in the counterfactual scenarios.
 
 # %%
 def handle_aging(s_scen: np.ndarray, i_scen: np.ndarray, t: int):
+    """Apply aging transitions to susceptible and infectious counts."""
     handle_aging_of_susceptible_cases(s_scen, t, False)
     handle_aging_of_infectious_cases(i_scen, t)
 
-# %% [markdown]
-# This function updates the susceptible compartments at time $t$ (if it is the first Monday of September) according to the above described aging process in the counterfactual scenarios. If the parameter **with_covid** is **False**, it computes the aging also in the total population.
-
 # %%
 def handle_aging_baseline(s_scen: np.ndarray, t: int, with_covid: bool):
+    """Apply aging transitions and update population for baseline scenarios."""
     handle_aging_of_susceptible_cases(s_scen, t, True)
     if with_covid: handle_aging_of_population(t)
 
@@ -283,6 +398,7 @@ def handle_aging_baseline(s_scen: np.ndarray, t: int, with_covid: bool):
 
 # %%
 def handle_aging_of_population(t: int):
+    """Redistribute population between age groups according to demographic rules."""
     A = state.NR_AGE_GROUPS
     population = state.POPULATION
     demographic_changes = state.BIRTH_MATRIX[:, t-1] - state.DEATHS_MATRIX[:, t-1]
@@ -305,6 +421,7 @@ def handle_aging_of_population(t: int):
 
 # %%
 def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool):
+    """Redistribute susceptible individuals between age groups during aging."""
     A = state.NR_AGE_GROUPS
     # age group 20+
     s_scen[A - 1, t] = s_scen[A - 1, t] + s_scen[A - 2, t] / 5
@@ -325,6 +442,7 @@ def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool
 
 # %%
 def handle_aging_of_infectious_cases(i_scen: np.ndarray, t: int):
+    """Reset infectious counts for the youngest age group during aging."""
     A = state.NR_AGE_GROUPS
     # age group 20+
     i_scen[A - 1, t] = i_scen[A - 1, t] + i_scen[A - 2, t] / 10
@@ -346,6 +464,19 @@ def handle_aging_of_infectious_cases(i_scen: np.ndarray, t: int):
 
 # %%
 def calculate_denominator(i_scen: np.ndarray, t: int) -> np.ndarray:
+    """
+    Compute the weighted sum of past incidences for week t.
+
+    Notes
+    -----
+    The denominator combines:
+    - the generation interval kernel,
+    - mortality adjustments,
+    - past incidence values,
+    - and the symmetrized contact matrix.
+
+    It represents the force of infection contributed by past weeks.
+    """
     cm = calculate_symmetrized_contact_matrix(t)
     mu_t = (state.DEATHS_MATRIX[:, t] / state.POPULATION[:, t]).reshape(1, -1)  # shape: (1,A)
     tau = np.arange(1, GlobalConfig.MAX_TAU + 1)  # shape: (A,1)
@@ -359,17 +490,31 @@ def calculate_denominator(i_scen: np.ndarray, t: int) -> np.ndarray:
 
 # %%
 def calculate_symmetrized_contact_matrix(t: int) -> np.ndarray:
+    """
+    Compute the symmetrized contact matrix for week t.
+
+    Notes
+    -----
+    Symmetrization accounts for differences in age‑group sizes and
+    ensures that contact rates are consistent in both directions.
+    """
     ## the size of the age groups at the previous week as a column vector
     population_i = state.POPULATION[:, t - 1].reshape(-1,1)
     ## the size of the age groups at the previous week as a row vector
     population_j = state.POPULATION[:, t - 1].reshape(1,-1)
     return (state.CONTACTS0 * population_i + state.CONTACTS0.T * population_j) / (2 * population_i)
 
-# %% [markdown]
-# This function calculates the number of susceptible individuals at time $t$ for a **scenario** with the given date of **start_of_vaccination**. If the parameter **with_covid** is **true**, the actual baseline scenario is considered. If it is false, a counterfactual scenario is computed with the same vaccination level and start time, but as if no COVID‑19 pandemic had occurred.
-
 # %%
 def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenario, with_covid: bool, start_of_vaccination: pd.Timestamp, t: int) -> np.ndarray:
+    """
+    Compute susceptible counts for week t in a hypothetical scenario.
+
+    Notes
+    -----
+    Uses scenario‑specific vaccination, infections, births, deaths,
+    and demographic changes. Before vaccination starts, baseline
+    susceptible counts are used.
+    """
     effectively_vaccinated_v1 = scenario.V1[:, t - 1] * GlobalConfig.V1_EFFICACY
     effectively_vaccinated_v2 = scenario.V2[:, t - 1] * GlobalConfig.V2_EFFICACY
     effectively_vaccinated = effectively_vaccinated_v1 + effectively_vaccinated_v2
@@ -384,23 +529,32 @@ def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenar
 
     return s_scen
 
-# %% [markdown]
-# This function calculates the number of new infections at time $t$ for a **scenario**. If the parameter **with_covid** is **true**, the actual baseline scenario is considered. If it is false, a counterfactual scenario is computed with the same vaccination level and start time, but as if no COVID‑19 pandemic had occurred. In this case the mean remainders are used for the computation computed by... .
-
 # %%
 def calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario: Scenario, with_covid: bool, t: int) -> np.ndarray:
+    """
+    Compute infectious incidences for week t in a hypothetical scenario.
+
+    Notes
+    -----
+    Incidences are derived from remainder terms and the weighted sum
+    of past infections, scaled by susceptibility.
+    """
     s_t = scenario.S[:,t] / state.POPULATION[:, t]
     remainders: np.ndarray[float] = state.REMAINDERS if with_covid else state.MEAN_REMAINDERS
-    #remainders: np.ndarray[float] = state.REMAINDERS if with_covid else state.NO_COVID_REMAINDERS
     r_t_scen = remainders[:, t] * s_t
     denominator = calculate_denominator(scenario.I, t)
     return r_t_scen * denominator
 
-# %% [markdown]
-# This function handles the computation of the number of susceptible individuals and new infections at time $t$ for a **scenario** with a given date of **start_of_vaccination**. If the parameter **with_covid** is **true**, the actual baseline scenario is considered. If it is false, a counterfactual scenario is computed with the same vaccination level and start time, but as if no COVID‑19 pandemic had occurred. The function controls also the aging process.
-
 # %%
 def calculate_next_step_for_scenario(scenario: Scenario, with_covid: bool, start_of_vaccination: pd.Timestamp, t: int):
+    """
+    Perform one full model step for a hypothetical scenario.
+
+    Notes
+    -----
+    Updates susceptible counts, applies aging, and computes new
+    infectious incidences for week t.
+    """
     scenario.S[:, t] = calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
     if is_time_for_aging(t) & (state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination): handle_aging_of_susceptible_cases(scenario.S, t, False)
     scenario.I[:, t] = calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario, with_covid, t)
@@ -419,6 +573,15 @@ def calculate_next_step_for_scenario(scenario: Scenario, with_covid: bool, start
 # %%
 def calculate_the_number_of_vaccinated_individuals_with_negative_offset(
         start_of_vaccination: pd.Timestamp, vacc_level: float, vacc1: np.ndarray):
+    """
+    Compute weekly first‑dose vaccination counts when vaccination
+    begins before the reference vaccination start date.
+
+    Notes
+    -----
+    Uses birth‑based proportional allocation for early weeks and
+    observed vaccination data afterwards.
+    """
     # Empty series for the weekly data
     v1_weekly = pd.Series(index=state.WEEKLY_INDEX, dtype=float)
     if start_of_vaccination + pd.DateOffset(months=-13) < state.WEEKLY_INDEX[0]:
@@ -433,11 +596,12 @@ def calculate_the_number_of_vaccinated_individuals_with_negative_offset(
             v1_weekly.loc[date] = state.WEEKLY_V1.loc[date] * vacc_level
         vacc1[1, :] = v1_weekly.values
 
-# %% [markdown]
-# This function controls the calculation of the number of vaccinated individuals starting vaccination at time **start_of_vaccination** with vaccination level relative to the actual baseline scenario (**vacc_level**).
-
 # %%
 def calculate_the_number_of_vaccinated_individuals(start_of_vaccination: pd.Timestamp, vacc_level: float, vacc1: np.ndarray):
+    """
+    Wrapper for computing weekly vaccination counts, handling cases
+    where vaccination starts earlier than the reference date.
+    """
     if start_of_vaccination <= GlobalConfig.START_OF_VACCINATION:
         calculate_the_number_of_vaccinated_individuals_with_negative_offset(start_of_vaccination, vacc_level, vacc1)
 
@@ -446,6 +610,15 @@ def calculate_the_number_of_vaccinated_individuals(start_of_vaccination: pd.Time
 
 # %%
 def calculate_mean_during_covid(data: np.ndarray[float], index: pd.Series) -> np.ndarray[float]:
+    """
+    Compute seasonal mean values for a dataset and construct a
+    no‑COVID counterfactual version.
+
+    Notes
+    -----
+    Weekly seasonal means are used to replace values during COVID
+    restriction periods, producing a smooth counterfactual dataset.
+    """
     df: pd.DataFrame = pd.DataFrame(data.T, index=index, columns=state.AGE_GROUPS)
     timerange_for_mean = ((df.index > GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=-5))
                           & (df.index < GlobalConfig.START_OF_VACCINATION))

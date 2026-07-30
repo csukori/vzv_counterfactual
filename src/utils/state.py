@@ -110,11 +110,10 @@ AFTER_2016_1_1_MASK: bool | None = None
 AFTER_2015_1_1_MASK: bool | None = None
 
 # No‑COVID counterfactual components.
-NO_COVID_REMAINDERS: np.ndarray[float] | None = None
 NO_COVID_BIRTHS: np.ndarray[float] | None = None
 NO_COVID_DEATHS: np.ndarray[float] | None = None
 
-# Mean values used for smoothing or comparison.
+# Mean values used in No-COVID scenarios.
 MEAN_I: np.ndarray[float] | None = None
 MEAN_REMAINDERS: np.ndarray[float] | None = None
 MEAN_I_SCENARIO: Scenario | None = None
@@ -314,10 +313,6 @@ def set_r_a(r_a):
 def set_rho(rho):
     global RHO
     RHO = rho
-
-def set_no_covid_remainders(no_covid_remainders):
-    global NO_COVID_REMAINDERS
-    NO_COVID_REMAINDERS = no_covid_remainders
 
 def set_no_covid_births(no_covid_births):
     global NO_COVID_BIRTHS
