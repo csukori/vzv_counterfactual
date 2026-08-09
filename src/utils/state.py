@@ -106,12 +106,13 @@ YEARS: np.ndarray[int] | None = None
 NR_TIMESTEPS: int | None = None
 
 # Masks for specific time periods used in analysis.
-AFTER_2016_1_1_MASK: bool | None = None
-AFTER_2015_1_1_MASK: bool | None = None
+AFTER_2016_1_1_MASK: np.ndarray[bool] | None = None
+AFTER_2015_1_1_MASK: np.ndarray[bool] | None = None
 
 # No‑COVID counterfactual components.
 NO_COVID_BIRTHS: np.ndarray[float] | None = None
 NO_COVID_DEATHS: np.ndarray[float] | None = None
+NO_COVID_POPULATION: np.ndarray[float] | None = None
 
 # Mean values used in No-COVID scenarios.
 MEAN_I: np.ndarray[float] | None = None
@@ -321,6 +322,10 @@ def set_no_covid_births(no_covid_births):
 def set_no_covid_deaths(no_covid_deaths):
     global NO_COVID_DEATHS
     NO_COVID_DEATHS = no_covid_deaths
+
+def set_no_covid_population(population):
+    global NO_COVID_POPULATION
+    NO_COVID_POPULATION = population
 
 def set_mean_i(mean_i):
     global MEAN_I

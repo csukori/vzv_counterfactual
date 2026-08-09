@@ -94,6 +94,8 @@ def calculate_number_of_susceptible_cases_in_baseline(with_covid: bool):
 
 # %% [markdown]
 # Function calculating remainder ($q_{a,t}$) based on Kayano, T., Ko, Y., Otani, K., Kobayashi, T., Suzuki, M., & Nishiura, H. (2023). Evaluating the COVID-19 vaccination program in Japan, 2021 using the counterfactual reproduction number. Scientific Reports, 13(1), 17762.
+#
+# Here, the effective reproduction number, $R_{ab,t}$, is calculated as follows:
 # $$
 # R_{ab,t} = s_{a,t} \cdot K_{ab,t} \cdot q_t,
 # $$
