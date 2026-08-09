@@ -87,7 +87,10 @@ def calculate_number_of_susceptible_cases_in_baseline(with_covid: bool):
         state.set_baseline_scenario(baseline_scenario)
         state.set_population(np.zeros((state.NR_AGE_GROUPS,state.NR_TIMESTEPS)))
         state.POPULATION[:, 0] = state.N0_VECTOR
-    else: state.set_mean_i_scenario(baseline_scenario)
+    else:
+        state.set_no_covid_population((np.zeros((state.NR_AGE_GROUPS,state.NR_TIMESTEPS))))
+        state.NO_COVID_POPULATION[:, 0] = state.N0_VECTOR
+        state.set_mean_i_scenario(baseline_scenario)
 
     for t in range(1,state.NR_TIMESTEPS):
         calculate_next_step_in_baseline(baseline_scenario, with_covid, t)
@@ -124,13 +127,13 @@ def calculate_number_of_susceptible_cases_in_baseline(with_covid: bool):
 # is implemented as the variable **denominator**, which captures the full renewal contribution from all age groups and past infectiousness.
 
 # %%
-def calculate_remainders(baseline: bool):
+def calculate_remainders(with_covid: bool):
     """
     Compute weekly remainder terms and related quantities.
 
     Parameters
     ----------
-    baseline : bool
+    with_covid : bool
         If True, compute remainders for the baseline scenario.
         If False, compute remainders for the mean‑incidence scenario.
 
@@ -145,23 +148,24 @@ def calculate_remainders(baseline: bool):
     remainders_t = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     r_a_t = np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))
     rho = np.zeros(state.NR_TIMESTEPS)
-    cases_matrix = state.CASES_MATRIX if baseline else state.MEAN_I_SCENARIO.I
-    s_matrix = state.BASELINE_SCENARIO.S if baseline else state.MEAN_I_SCENARIO.S
+    cases_matrix = state.CASES_MATRIX if with_covid else state.MEAN_I_SCENARIO.I
+    s_matrix = state.BASELINE_SCENARIO.S if with_covid else state.MEAN_I_SCENARIO.S
+    population_mtx = state.POPULATION if with_covid else state.NO_COVID_POPULATION
 
     for t in range(math.ceil(GlobalConfig.MAX_TAU), state.NR_TIMESTEPS):
-        cm = calculate_symmetrized_contact_matrix(t)
+        cm = calculate_symmetrized_contact_matrix(with_covid, t)
         # weighted sum of past incidences
-        denominator = calculate_denominator(cases_matrix, t)
+        denominator = calculate_denominator(cases_matrix, with_covid, t)
 
         if denominator.all() > 0 and s_matrix[:, t].all() > 0:
-            s_t = s_matrix[:, t] / state.POPULATION[:, t]
+            s_t = s_matrix[:, t] / population_mtx[:, t]
             remainders_t[:, t] = cases_matrix[:, t] / (s_t * denominator)
             r_a_t[:, t] = remainders_t[:, t] * s_t
             rho[t] = max(abs(np.linalg.eigvals(cm * r_a_t[:, t])))
         else:
             remainders_t[:, t] = np.nan
 
-    if baseline:
+    if with_covid:
         state.set_remainders(remainders_t)
         state.set_r_a(r_a_t)
         state.set_rho(rho)
@@ -174,7 +178,7 @@ def calculate_remainders(baseline: bool):
 # In the following function the number of incidences is calculated in the baseline scenario.
 
 # %%
-def calculate_number_of_incidences_based_on_remainders():
+def calculate_number_of_incidences_based_on_remainders(with_covid: bool):
     """
     Reconstruct weekly incidences using remainder terms.
 
@@ -192,7 +196,7 @@ def calculate_number_of_incidences_based_on_remainders():
         i_model[:, t] = state.CASES_MATRIX[:, t]
 
     for t in range(math.ceil(GlobalConfig.MAX_TAU), T - 1):
-        denominator = calculate_denominator(state.CASES_MATRIX, t)
+        denominator = calculate_denominator(state.CASES_MATRIX, with_covid, t)
         i_model[:, t] = state.R_A[:, t] * denominator
 
     state.BASELINE_SCENARIO.I = i_model
@@ -241,8 +245,8 @@ def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float
     calculate_the_number_of_vaccinated_individuals(start_of_vaccination, vacc_level, scenario.V1)
     for t in range(0, state.NR_TIMESTEPS - 1):
         if state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination:
-            scenario.I[:, t] = state.CASES_MATRIX[:, t]
-            scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t]
+            scenario.I[:, t] = state.CASES_MATRIX[:, t] if with_covid else state.MEAN_I_SCENARIO.I[:, t]
+            scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t] if with_covid else state.MEAN_I_SCENARIO.S[:, t]
 
     for t in range(math.ceil(GlobalConfig.MAX_TAU), state.NR_TIMESTEPS):
         if state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination:
@@ -305,10 +309,11 @@ def calculate_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int
     """
     calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario, with_covid, t)
     update_scenario_when_aging(scenario, t, True, with_covid)
-    if with_covid: calculate_size_of_population_in_next_step(t)
+    #if with_covid: calculate_size_of_population_in_next_step(with_covid, t)
+    calculate_size_of_population_in_next_step(with_covid, t)
 
 # %%
-def calculate_size_of_population_in_next_step(t: int):
+def calculate_size_of_population_in_next_step(with_covid: bool, t: int):
     """
     Update the age‑structured population for week t.
 
@@ -318,10 +323,13 @@ def calculate_size_of_population_in_next_step(t: int):
     Monday of September, when aging is handled separately. Births
     and deaths are incorporated into each age group.
     """
+    population_mtx = state.POPULATION if with_covid else state.NO_COVID_POPULATION
+    birth_mtx = state.BIRTH_MATRIX if with_covid else state.NO_COVID_BIRTHS
+    death_mtx = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
     is_not_the_first_monday_of_september = not ((state.WEEKLY_CASES_FILLED.index[t].month == 9) &
                                     (state.WEEKLY_CASES_FILLED.index[t].day <= 7))
     if (t <= state.NR_TIMESTEPS - 1) & is_not_the_first_monday_of_september:
-        state.POPULATION[:, t] = state.POPULATION[:, t - 1] + state.BIRTH_MATRIX[:, t - 1] - state.DEATHS_MATRIX[:, t - 1]
+        population_mtx[:, t] = population_mtx[:, t - 1] + birth_mtx[:, t - 1] - death_mtx[:, t - 1]
 
 # %%
 def calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int):
@@ -344,7 +352,8 @@ def calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario: Sce
     cases_matrix = state.CASES_MATRIX[:, t-1] if with_covid else state.MEAN_I[:, t-1]
     births = state.BIRTH_MATRIX[:, t-1] if with_covid else state.NO_COVID_BIRTHS[:,t-1]
     deaths = state.DEATHS_MATRIX[:, t-1] if with_covid else state.NO_COVID_DEATHS[:,t-1]
-    demographic_changes = (births - deaths * (scenario.S[:, t-1] / state.POPULATION[:, t - 1]))
+    population = state.POPULATION[:, t - 1] if with_covid else state.NO_COVID_POPULATION[:, t - 1]
+    demographic_changes = (births - deaths * (scenario.S[:, t-1] / population))
     scenario.S[:, t] = (scenario.S[:, t - 1] - cases_matrix - effectively_vaccinated + demographic_changes)
 
 # %% [markdown]
@@ -383,26 +392,27 @@ def is_time_for_aging(t: int) -> bool:
 
 
 # %%
-def handle_aging(s_scen: np.ndarray, i_scen: np.ndarray, t: int):
+def handle_aging(s_scen: np.ndarray, i_scen: np.ndarray, t: int, with_covid: bool):
     """Apply aging transitions to susceptible and infectious counts."""
-    handle_aging_of_susceptible_cases(s_scen, t, False)
+    handle_aging_of_susceptible_cases(s_scen, t, False, with_covid)
     handle_aging_of_infectious_cases(i_scen, t)
 
 # %%
 def handle_aging_baseline(s_scen: np.ndarray, t: int, with_covid: bool):
     """Apply aging transitions and update population for baseline scenarios."""
-    handle_aging_of_susceptible_cases(s_scen, t, True)
-    if with_covid: handle_aging_of_population(t)
+    handle_aging_of_susceptible_cases(s_scen, t, True, with_covid)
+    #if with_covid: handle_aging_of_population(with_covid, t)
+    handle_aging_of_population(with_covid, t)
 
 # %% [markdown]
 # This function updates the total population at time $t$ (if it is the first Monday of September) according to the above described aging process.
 # In the age groups 10–14, 15–19, and 20+, only a fraction of individuals moves to the next age group. Specifically, we assume that one fifth advances, whereas four fifths remain in the same age group.
 
 # %%
-def handle_aging_of_population(t: int):
+def handle_aging_of_population(with_covid: bool, t: int):
     """Redistribute population between age groups according to demographic rules."""
     A = state.NR_AGE_GROUPS
-    population = state.POPULATION
+    population = state.POPULATION if with_covid else state.NO_COVID_POPULATION
     demographic_changes = state.BIRTH_MATRIX[:, t-1] - state.DEATHS_MATRIX[:, t-1]
     # age group 20+
     population[A - 1, t] = population[A - 1, t - 1] + population[A - 2, t - 1] / 5 + demographic_changes[A - 1]
@@ -422,9 +432,11 @@ def handle_aging_of_population(t: int):
 # If the calculation is performed for the baseline scenario, births and deaths are also taken into account by this function. In counterfactual scenarios, births and deaths are incorporated only when computing the number of susceptible individuals for the next timestep in the function _calculate_nr_of_susceptible_cases_in_next_step_for_scenario_.
 
 # %%
-def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool):
+def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool, with_covid: bool):
     """Redistribute susceptible individuals between age groups during aging."""
     A = state.NR_AGE_GROUPS
+    birth_mtx = state.BIRTH_MATRIX if with_covid else state.NO_COVID_BIRTHS
+    death_matrix = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
     # age group 20+
     s_scen[A - 1, t] = s_scen[A - 1, t] + s_scen[A - 2, t] / 5
     # age group 15-19
@@ -435,7 +447,7 @@ def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool
     for a in range(A - 4, 0, -1):
         s_scen[a, t] = s_scen[a - 1, t]
     if baseline:
-        s_scen[0,t] = state.BIRTH_MATRIX[0,t-1]-state.DEATHS_MATRIX[0,t-1]
+        s_scen[0,t] = birth_mtx[0,t-1]-death_matrix[0,t-1]
     else :
         s_scen[0, t] = 1
 
@@ -465,7 +477,7 @@ def handle_aging_of_infectious_cases(i_scen: np.ndarray, t: int):
 # in the denominator of the formula for the remainders ($q_{a,t}$) is referred as **denominator** in the implementation. This function computes the value of this expression.
 
 # %%
-def calculate_denominator(i_scen: np.ndarray, t: int) -> np.ndarray:
+def calculate_denominator(i_scen: np.ndarray, with_covid: bool, t: int) -> np.ndarray:
     """
     Compute the weighted sum of past incidences for week t.
 
@@ -479,8 +491,10 @@ def calculate_denominator(i_scen: np.ndarray, t: int) -> np.ndarray:
 
     It represents the force of infection contributed by past weeks.
     """
-    cm = calculate_symmetrized_contact_matrix(t)
-    mu_t = (state.DEATHS_MATRIX[:, t] / state.POPULATION[:, t]).reshape(1, -1)  # shape: (1,A)
+    population_mtx = state.POPULATION if with_covid else state.NO_COVID_POPULATION
+    death_mtx = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
+    cm = calculate_symmetrized_contact_matrix(with_covid, t)
+    mu_t = (death_mtx[:, t] / population_mtx[:, t]).reshape(1, -1)  # shape: (1,A)
     tau = np.arange(1, GlobalConfig.MAX_TAU + 1)  # shape: (A,1)
     kernel = G.reshape(-1, 1) * np.exp(-mu_t * tau.reshape(-1, 1))
     return np.sum(i_scen[:,t-tau] * kernel.T, axis=1) @ cm
@@ -491,7 +505,7 @@ def calculate_denominator(i_scen: np.ndarray, t: int) -> np.ndarray:
 # This function symmetrize the measured matrix.
 
 # %%
-def calculate_symmetrized_contact_matrix(t: int) -> np.ndarray:
+def calculate_symmetrized_contact_matrix(with_covid: bool, t: int) -> np.ndarray:
     """
     Compute the symmetrized contact matrix for week t.
 
@@ -501,9 +515,10 @@ def calculate_symmetrized_contact_matrix(t: int) -> np.ndarray:
     ensures that contact rates are consistent in both directions.
     """
     ## the size of the age groups at the previous week as a column vector
-    population_i = state.POPULATION[:, t - 1].reshape(-1,1)
+    population = state.POPULATION if with_covid else state.NO_COVID_POPULATION
+    population_i = population[:, t - 1].reshape(-1,1)
     ## the size of the age groups at the previous week as a row vector
-    population_j = state.POPULATION[:, t - 1].reshape(1,-1)
+    population_j = population[:, t - 1].reshape(1,-1)
     return (state.CONTACTS0 * population_i + state.CONTACTS0.T * population_j) / (2 * population_i)
 
 # %%
@@ -521,8 +536,9 @@ def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenar
     effectively_vaccinated_v2 = scenario.V2[:, t - 1] * GlobalConfig.V2_EFFICACY
     effectively_vaccinated = effectively_vaccinated_v1 + effectively_vaccinated_v2
     birth_mtx: np.ndarray[float] = state.BIRTH_MATRIX if with_covid else state.NO_COVID_BIRTHS
-    death_matrix: np.ndarray[float] = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
-    demographic_changes = (birth_mtx[:,t-1] - death_matrix[:,t-1] * (scenario.S[:,t-1] / state.POPULATION[:,t-1]))
+    death_mtx: np.ndarray[float] = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
+    population_mtx: np.ndarray[float] = state.POPULATION if with_covid else state.NO_COVID_POPULATION
+    demographic_changes = (birth_mtx[:,t-1] - death_mtx[:,t-1] * (scenario.S[:,t-1] / population_mtx[:,t-1]))
 
     if state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination:
         s_scen = state.BASELINE_SCENARIO.S[:, t]
@@ -541,10 +557,11 @@ def calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario: Sc
     Incidences are derived from remainder terms and the weighted sum
     of past infections, scaled by susceptibility.
     """
-    s_t = scenario.S[:,t] / state.POPULATION[:, t]
+    population = state.POPULATION if with_covid else state.NO_COVID_POPULATION
+    s_t = scenario.S[:,t] / population[:, t]
     remainders: np.ndarray[float] = state.REMAINDERS if with_covid else state.MEAN_REMAINDERS
     r_t_scen = remainders[:, t] * s_t
-    denominator = calculate_denominator(scenario.I, t)
+    denominator = calculate_denominator(scenario.I, with_covid, t)
     return r_t_scen * denominator
 
 # %%
@@ -558,7 +575,7 @@ def calculate_next_step_for_scenario(scenario: Scenario, with_covid: bool, start
     infectious incidences for week t.
     """
     scenario.S[:, t] = calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
-    if is_time_for_aging(t) & (state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination): handle_aging_of_susceptible_cases(scenario.S, t, False)
+    if is_time_for_aging(t) & (state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination): handle_aging_of_susceptible_cases(scenario.S, t, False, with_covid)
     scenario.I[:, t] = calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario, with_covid, t)
     if is_time_for_aging(t) : handle_aging_of_infectious_cases(scenario.I, t)
 
