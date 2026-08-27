@@ -330,7 +330,7 @@ def plot_compare_scenario_to_actual_case(scen_i: pd.Series, scenario_name: str):
     plt.show()
 
 
-def plot_annual_annual_number_of_cases_for_age_groups(scen_i: np.ndarray, min_age: int, max_age: int, scenario_name: str):
+def plot_annual_number_of_cases_for_age_groups(scen_i: np.ndarray, min_age: int, max_age: int, scenario_name: str):
     """
     Plot annual model estimates for multiple age groups.
 
@@ -422,14 +422,16 @@ def plot_heatmap(dataframe: pd.DataFrame, title: str):
     """
     fig, ax = plt.subplots(figsize=(14, 6))
     im = heatmap(dataframe, ax=ax)
+    age_groups = dataframe.index
+    weekly_index = dataframe.columns
 
-    ax.set_yticks(np.arange(len(state.AGE_GROUPS)))
-    ax.set_yticklabels(state.AGE_GROUPS)
+    ax.set_yticks(np.arange(len(age_groups)))
+    ax.set_yticklabels(age_groups)
 
-    ax.set_xticks(np.linspace(0, len(state.WEEKLY_INDEX)-1, 10).astype(int))
+    ax.set_xticks(np.linspace(0, len(weekly_index)-1, 10).astype(int))
     ax.set_xticklabels(
-        [state.WEEKLY_INDEX[i].strftime("%Y-%m-%d")
-         for i in np.linspace(0, len(state.WEEKLY_INDEX)-1, 10).astype(int)],
+        [weekly_index[i].strftime("%Y-%m-%d")
+         for i in np.linspace(0, len(weekly_index)-1, 10).astype(int)],
         rotation=45,
         ha="right"
     )
@@ -465,9 +467,10 @@ def plot_cumulative_cases(scenarios: list[Scenario], index, mask):
     fig, ax = plt.subplots(figsize=(10, 5))
 
     for scenario in scenarios:
-        cum = scenario.I.sum(axis=0).cumsum()
-        ax.plot(index, cum[mask], label=scenario.name)
-        ax.fill_between(index, cum[mask], alpha=0.5)
+        i_total = scenario.I.sum(axis=0)
+        cum = i_total[mask].cumsum()
+        ax.plot(index, cum, label=scenario.name)
+        ax.fill_between(index, cum, alpha=0.5)
 
     ax.xaxis.set_major_locator(mdates.YearLocator(1))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
@@ -517,4 +520,56 @@ def plot_cumulative_i_and_v(scenario: Scenario, starting_date):
     ax.set_ylabel("Cumulative count")
     ax.legend()
     plt.tight_layout()
+    plt.show()
+
+
+def plot_cumulative_cases_barchart(scenarios: list[Scenario], mask=None, title="Cumulative cases by vaccination rate"):
+    """
+    Barchart a szcenáriók kumulatív esetszámáról az index végén.
+
+    scenarios: lista szcenárió objektumokkal
+    index: pandas index (heti dátumok)
+    mask: opcionális boolean maszk (ha csak egy időszakot akarsz nézni)
+    title: ábra címe
+    """
+
+    vaccination_rates = []
+    cumulative_values = []
+
+    for scen in scenarios:
+        i_total = scen.I.sum(axis=0)
+        if mask is not None:
+            i_total = i_total[mask]
+        cum = i_total.cumsum()
+        cumulative_values.append(cum[-1])
+        vaccination_rates.append(scen.name)
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    ax.bar(vaccination_rates, cumulative_values, color="steelblue", alpha=0.8, width=0.6)
+    ax.set_ylim(1500000)
+    ax.set_title(title)
+    ax.set_xlabel("Vaccination rate scenarios")
+    ax.set_ylabel("Cumulative cases at end of period")
+    plt.xticks(rotation=45, ha="right")
+    plt.subplots_adjust(bottom=0.3)
+    plt.show()
+
+
+def plot_compare_annual_incidences_for_scenarios(scen_i: list[Scenario]):
+    fig, ax = plt.subplots()
+
+    for scen in scen_i:
+        ax.plot(scen.annual_i_series.index, scen.annual_i_series.values, label=scen.name, linewidth=1)
+
+    ax.xaxis.set_major_locator(mdates.YearLocator(3))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    ax.grid(alpha=0.3)
+
+    plt.title("Compare scenarios with different detection rate and same vaccination rate")
+    plt.xlabel("Date")
+    plt.ylabel("Annual number of cases")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.legend()
     plt.show()

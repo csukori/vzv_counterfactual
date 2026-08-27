@@ -77,9 +77,9 @@ class Scenario:
                 setattr(self, field, np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS)))
             else:
                 setattr(self, field, value)
-        self.compute_i_series()
+        if state.AGE_STRUCTURED_DATA_INDEX is not None: self.compute_i_series(state.AGE_STRUCTURED_DATA_INDEX)
 
-    def compute_i_series(self):
+    def compute_i_series(self, index: pd.DatetimeIndex):
         """
         Computes weekly and annual infection totals.
 
@@ -92,7 +92,7 @@ class Scenario:
             This produces a high-level view of how many infections occurred
             in each year of the simulation.
         """
-        self.weekly_i_series = pd.Series(np.sum(self.I, axis=0), index=state.AGE_STRUCTURED_DATA_INDEX)
+        self.weekly_i_series = pd.Series(np.sum(self.I, axis=0), index=index)
 
         self.annual_i_series = (
             self.weekly_i_series

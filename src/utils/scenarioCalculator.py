@@ -95,6 +95,13 @@ def calculate_number_of_susceptible_cases_in_baseline(with_covid: bool):
     for t in range(1,state.NR_TIMESTEPS):
         calculate_next_step_in_baseline(baseline_scenario, with_covid, t)
 
+def calculate_no_covid_population():
+    state.set_no_covid_population((np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS))))
+    state.NO_COVID_POPULATION[:, 0] = state.N0_VECTOR
+    for t in range(1, state.NR_TIMESTEPS):
+        calculate_size_of_population_in_next_step(False, t)
+        if is_time_for_aging(t): handle_aging_of_population(False, t)
+
 # %% [markdown]
 # Function calculating remainder ($q_{a,t}$) based on Kayano, T., Ko, Y., Otani, K., Kobayashi, T., Suzuki, M., & Nishiura, H. (2023). Evaluating the COVID-19 vaccination program in Japan, 2021 using the counterfactual reproduction number. Scientific Reports, 13(1), 17762.
 #
@@ -200,7 +207,7 @@ def calculate_number_of_incidences_based_on_remainders(with_covid: bool):
         i_model[:, t] = state.R_A[:, t] * denominator
 
     state.BASELINE_SCENARIO.I = i_model
-    state.BASELINE_SCENARIO.compute_i_series()
+    state.BASELINE_SCENARIO.compute_i_series(state.AGE_STRUCTURED_DATA_INDEX)
 
 # %% [markdown]
 # Function calculating the number of incidences in different counterfactual vaccination scenarios. The start of the vaccination and the level of vaccination coverage can be changed.
@@ -245,13 +252,17 @@ def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float
     calculate_the_number_of_vaccinated_individuals(start_of_vaccination, vacc_level, scenario.V1)
     for t in range(0, state.NR_TIMESTEPS - 1):
         if state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination:
-            scenario.I[:, t] = state.CASES_MATRIX[:, t] if with_covid else state.MEAN_I_SCENARIO.I[:, t]
-            scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t] if with_covid else state.MEAN_I_SCENARIO.S[:, t]
+            scenario.I[:, t] = state.CASES_MATRIX[:, t]
+            #scenario.I[:, t] = state.CASES_MATRIX[:, t] if with_covid else state.MEAN_I_SCENARIO.I[:, t]
+            scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t]
+            #scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t] if with_covid else state.MEAN_I_SCENARIO.S[:, t]
 
     for t in range(math.ceil(GlobalConfig.MAX_TAU), state.NR_TIMESTEPS):
-        if state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination:
-            calculate_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
-    scenario.compute_i_series()
+        is_next_step_calculated: bool = ((start_of_vaccination <= GlobalConfig.START_OF_VACCINATION) & (state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination))\
+                | ((start_of_vaccination > GlobalConfig.START_OF_VACCINATION) & (state.WEEKLY_CASES_FILLED.index[t] >= GlobalConfig.START_OF_VACCINATION))
+        if is_next_step_calculated:
+             calculate_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
+    scenario.compute_i_series(state.AGE_STRUCTURED_DATA_INDEX)
     return scenario
 
 # %% [markdown]
@@ -540,7 +551,12 @@ def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenar
     population_mtx: np.ndarray[float] = state.POPULATION if with_covid else state.NO_COVID_POPULATION
     demographic_changes = (birth_mtx[:,t-1] - death_mtx[:,t-1] * (scenario.S[:,t-1] / population_mtx[:,t-1]))
 
-    if state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination:
+    is_baseline_used: bool =((start_of_vaccination < GlobalConfig.START_OF_VACCINATION) & (
+                state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination)) \
+    | ((start_of_vaccination > GlobalConfig.START_OF_VACCINATION) & (state.WEEKLY_CASES_FILLED.index[
+        t] < GlobalConfig.START_OF_VACCINATION))
+
+    if is_baseline_used:
         s_scen = state.BASELINE_SCENARIO.S[:, t]
     else:
         s_scen = scenario.S[:, t-1] - scenario.I[:, t-1] - effectively_vaccinated + demographic_changes
@@ -574,8 +590,12 @@ def calculate_next_step_for_scenario(scenario: Scenario, with_covid: bool, start
     Updates susceptible counts, applies aging, and computes new
     infectious incidences for week t.
     """
+    is_next_step_calculated: bool = ((start_of_vaccination <= GlobalConfig.START_OF_VACCINATION) & (
+                state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination)) \
+                              | ((start_of_vaccination > GlobalConfig.START_OF_VACCINATION) & (
+                state.WEEKLY_CASES_FILLED.index[t] >= GlobalConfig.START_OF_VACCINATION))
     scenario.S[:, t] = calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
-    if is_time_for_aging(t) & (state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination): handle_aging_of_susceptible_cases(scenario.S, t, False, with_covid)
+    if is_time_for_aging(t) & is_next_step_calculated: handle_aging_of_susceptible_cases(scenario.S, t, False, with_covid)
     scenario.I[:, t] = calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario, with_covid, t)
     if is_time_for_aging(t) : handle_aging_of_infectious_cases(scenario.I, t)
 
@@ -615,6 +635,16 @@ def calculate_the_number_of_vaccinated_individuals_with_negative_offset(
             v1_weekly.loc[date] = state.WEEKLY_V1.loc[date] * vacc_level
         vacc1[1, :] = v1_weekly.values
 
+def calculate_the_number_of_vaccinated_individuals_with_positive_offset(
+        start_of_vaccination: pd.Timestamp, vacc_level: float, vacc1: np.ndarray):
+    v1_weekly = pd.Series(index=state.WEEKLY_INDEX, dtype=float)
+    for date in state.WEEKLY_INDEX:
+        if date < start_of_vaccination:
+            v1_weekly.loc[date] = 0
+        else:
+            v1_weekly.loc[date] = state.WEEKLY_V1.loc[date] * vacc_level
+        vacc1[1, :] = v1_weekly.values
+
 # %%
 def calculate_the_number_of_vaccinated_individuals(start_of_vaccination: pd.Timestamp, vacc_level: float, vacc1: np.ndarray):
     """
@@ -623,6 +653,8 @@ def calculate_the_number_of_vaccinated_individuals(start_of_vaccination: pd.Time
     """
     if start_of_vaccination <= GlobalConfig.START_OF_VACCINATION:
         calculate_the_number_of_vaccinated_individuals_with_negative_offset(start_of_vaccination, vacc_level, vacc1)
+    else:
+        calculate_the_number_of_vaccinated_individuals_with_positive_offset(start_of_vaccination, vacc_level, vacc1)
 
 # %% [markdown]
 # This function calculates the mean of the given **data** in the timerange 01/09/2014 - 01/09/2019. This mean values are used then during the restrictions and the actual data otherwise. (The mean value of births, deaths and varicella cases are calculated by this function and used during the restrictions. The mean value of remainders is calculated then based on the mean number of varicella cases.)
@@ -652,4 +684,56 @@ def calculate_mean_during_covid(data: np.ndarray[float], index: pd.Series) -> np
         else:
             week_of_year: int = state.WEEKLY_INDEX[t].week
             no_cov_data[:, t] = mean_data.loc[week_of_year]
+    return no_cov_data
+
+def estimate_rt_during_covid(data: np.ndarray[float], index: pd.Series) -> np.ndarray:
+    df: pd.DataFrame = pd.DataFrame(data.T, index=index, columns=state.AGE_GROUPS)
+    timerange_for_mean = ((df.index > GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=-5))
+                         & (df.index < GlobalConfig.START_OF_VACCINATION))
+    q_pre = df.loc[timerange_for_mean]   # q: DataFrame, oszlopok: korcsoportok
+    mu = q_pre.mean()   # minden korcsoport átlagos q-ja
+    weeks_pre = q_pre.index.isocalendar().week
+    seasonal = q_pre.groupby(weeks_pre).mean()   # heti átlag korcsoportonként
+    seasonal = seasonal - mu                     # demeanelés
+
+    weeks_full = df.index.isocalendar().week
+    q_nocovid = pd.DataFrame(index=df.index, columns=df.columns)
+
+    for col in df.columns:   # minden korcsoport
+        q_nocovid[col] = mu[col] + seasonal[col].reindex(weeks_full).values
+
+    covid_mask = (df.index >= pd.Timestamp("2020-03-16")) & (df.index <= pd.Timestamp("2025-09-01"))
+
+    q_final = df.copy()   # valódi adatok
+    q_final.loc[covid_mask] = q_nocovid.loc[covid_mask]*0.9   # csak COVID alatt becslés
+
+    return q_final.values.T
+
+def calculate_mean_during_covid(data: np.ndarray[float], index: pd.Series) -> np.ndarray[float]:
+    df: pd.DataFrame = pd.DataFrame(data.T, index=index, columns=state.AGE_GROUPS)
+    timerange_for_mean = ((df.index > GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=-5))
+                         & (df.index < GlobalConfig.START_OF_VACCINATION))
+    #timerange_for_mean = (((df.index > pd.Timestamp(2019,1,1) + pd.DateOffset(years=-2)) & (df.index < pd.Timestamp(2019,1,1))) |
+    #                      ((df.index > pd.Timestamp("2020-03-16")) & (df.index < pd.Timestamp("2020-03-16") + pd.DateOffset(years=2))))
+    df_sub = df[timerange_for_mean].copy()
+    # év távolsága a jelenhez képest
+    current_year = df.index.max().year
+    df_sub["weight"] = current_year - df_sub.index.year + 1
+    #weekly_weighted_mean = (df_sub.groupby(df_sub.index.isocalendar().week).apply(lambda g: np.average(g["value"], weights=g["weight"])))
+
+
+    mean_data: pd.DataFrame = df[timerange_for_mean].groupby(df.index[timerange_for_mean].map(lambda i: i.week)).mean()
+    no_cov_data: np.ndarray = np.zeros((len(state.AGE_GROUPS), len(state.WEEKLY_INDEX)))
+    min_t = len(state.WEEKLY_INDEX) - len(index)
+    max_t = len(state.WEEKLY_INDEX)
+    for t in range(0, len(state.WEEKLY_INDEX)):
+    #for t in range(min_t, max_t):
+        #no_cov_data[:, t] = data[:, t - min_t]
+        no_cov_data[:, t] = data[:, t]
+        if (state.WEEKLY_INDEX[t] > pd.Timestamp("2020-03-16")) and (state.WEEKLY_INDEX[t] < pd.Timestamp("2025-09-01")):
+            week_of_year: int = state.WEEKLY_INDEX[t].week
+            if week_of_year > len(mean_data):
+                no_cov_data[:, t] = mean_data.loc[week_of_year-1][:]
+            else:
+                no_cov_data[:, t] = mean_data.loc[week_of_year][:]
     return no_cov_data

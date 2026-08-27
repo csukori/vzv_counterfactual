@@ -15,19 +15,22 @@ DETECTION_RATE_BEFORE: float = 0.4
 # Assumes improved or stable detection efficiency in the post‑vaccination period.
 DETECTION_RATE_AFTER: float = 0.4
 
+TEST_RATE: float = 0.15
 
 
-def convert_df_cases_to_weekly_cases(df_cases: DataFrame) -> Series | DataFrame:
+def convert_df_cases_to_weekly_cases(df_cases: DataFrame, detection_rate_after: float =None) -> Series | DataFrame:
     """
     Convert a table of weekly case counts (e.g. '2020_1') into a
     time-indexed weekly case Series.
 
     Parameters
     ----------
-    df_cases : DataFrame
+    :param df_cases : DataFrame
         Input table containing columns:
         - 'Week' in the format 'YYYY_WW'
         - 'Cases' giving weekly case counts.
+    :param detection_rate_after : float
+        Detection rate after Covid
 
     Returns
     -------
@@ -53,8 +56,10 @@ def convert_df_cases_to_weekly_cases(df_cases: DataFrame) -> Series | DataFrame:
     df_weekly_cases = df_cases.set_index("Date").sort_index()
     weekly_cases = df_weekly_cases["Cases"].copy()
 
+    if detection_rate_after is None:
+        detection_rate_after = DETECTION_RATE_AFTER
     weekly_cases.loc[weekly_cases.index < GlobalConfig.START_OF_VACCINATION] *= 1 / DETECTION_RATE_BEFORE
-    weekly_cases.loc[weekly_cases.index >= GlobalConfig.START_OF_VACCINATION] *= 1 / DETECTION_RATE_AFTER
+    weekly_cases.loc[weekly_cases.index >= GlobalConfig.START_OF_VACCINATION] *= 1 / detection_rate_after
     return weekly_cases
 
 
@@ -108,7 +113,7 @@ def convert_df_age_structured_cases(df_age_structured_cases: DataFrame) -> Serie
     return annual_cases
 
 
-def create_case_matrix(annual_cases, weekly_cases_filled, weekly_cases_full) -> ndarray:
+def create_case_matrix(annual_cases, weekly_cases_filled, weekly_cases_full, detection_rate_after: float = None) -> ndarray:
     """
     Distribute annual age‑structured case counts into weekly values.
 
@@ -134,14 +139,25 @@ def create_case_matrix(annual_cases, weekly_cases_filled, weekly_cases_full) -> 
     the relative share of weekly cases within each year.
     """
     weekly_age_structured = {}
+    if detection_rate_after is None:
+        detection_rate_after = DETECTION_RATE_AFTER
 
+    age_of_first_vacc_group: int = 2
     for age in state.AGE_GROUPS:
         s = pd.Series(np.zeros(len(weekly_cases_full.index), dtype=float), index=weekly_cases_full.index)
         for year in state.YEARS:
-            annual_value = annual_cases.loc[age, year] * (1 / DETECTION_RATE_BEFORE)
-            props = weekly_proportions_for_year(weekly_cases_filled, year)
+            if year <= GlobalConfig.END_OF_RESTRICTIONS.year:
+                annual_value = annual_cases.loc[age, year] * (1 / DETECTION_RATE_BEFORE)
+            else:
+                annual_value = annual_cases.loc[age, year] * (1 / detection_rate_after)
+            corrigate_props = ((year > GlobalConfig.START_OF_VACCINATION.year + (age_of_first_vacc_group - 2))
+                               & (state.AGE_GROUPS.index(age) == age_of_first_vacc_group))
+            props = weekly_proportions_for_week_for_firstly_vaccinated_cohort(weekly_cases_filled, year) if corrigate_props\
+                else weekly_proportions_for_year(weekly_cases_filled, year)
+            #props = weekly_proportions_for_year(weekly_cases_filled, year)
             mask = weekly_cases_filled.index.year == year
             s.loc[mask] = props * annual_value
+            if corrigate_props: age_of_first_vacc_group += 1
         weekly_age_structured[age] = s
 
     return np.column_stack([weekly_age_structured[age].values for age in state.AGE_GROUPS]).T
@@ -168,6 +184,12 @@ def weekly_proportions_for_year(weekly_cases_filled, year):
     total = year_data.sum()
     return year_data / total
 
+def weekly_proportions_for_week_for_firstly_vaccinated_cohort(weekly_cases_filled, year) -> Series:
+    data = weekly_cases_filled[weekly_cases_filled.index.year == year]
+    mask_after = (data.index.month >= 9)
+    data[mask_after] = data[mask_after]*TEST_RATE
+    total = data.sum()
+    return data / total
 
 def convert_annual_deaths(df_deaths: DataFrame) -> Series | DataFrame:
     """
