@@ -100,7 +100,6 @@ def calculate_no_covid_population():
     state.NO_COVID_POPULATION[:, 0] = state.N0_VECTOR
     for t in range(1, state.NR_TIMESTEPS):
         calculate_size_of_population_in_next_step(False, t)
-        if is_time_for_aging(t): handle_aging_of_population(False, t)
 
 # %% [markdown]
 # Function calculating remainder ($q_{a,t}$) based on Kayano, T., Ko, Y., Otani, K., Kobayashi, T., Suzuki, M., & Nishiura, H. (2023). Evaluating the COVID-19 vaccination program in Japan, 2021 using the counterfactual reproduction number. Scientific Reports, 13(1), 17762.
@@ -258,8 +257,11 @@ def calculate_number_of_cases_for_scenario(scenario_name: str, vacc_level: float
             #scenario.S[:, t] = state.BASELINE_SCENARIO.S[:, t] if with_covid else state.MEAN_I_SCENARIO.S[:, t]
 
     for t in range(math.ceil(GlobalConfig.MAX_TAU), state.NR_TIMESTEPS):
-        is_next_step_calculated: bool = ((start_of_vaccination <= GlobalConfig.START_OF_VACCINATION) & (state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination))\
-                | ((start_of_vaccination > GlobalConfig.START_OF_VACCINATION) & (state.WEEKLY_CASES_FILLED.index[t] >= GlobalConfig.START_OF_VACCINATION))
+        is_next_step_calculated: bool = (
+                ((start_of_vaccination <= GlobalConfig.START_OF_VACCINATION)
+                 & (state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination))
+                | ((start_of_vaccination > GlobalConfig.START_OF_VACCINATION)
+                   & (state.WEEKLY_CASES_FILLED.index[t] >= GlobalConfig.START_OF_VACCINATION)))
         if is_next_step_calculated:
              calculate_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
     scenario.compute_i_series(state.AGE_STRUCTURED_DATA_INDEX)
@@ -319,8 +321,6 @@ def calculate_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int
     - update population (if COVID dynamics are included).
     """
     calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario, with_covid, t)
-    update_scenario_when_aging(scenario, t, True, with_covid)
-    #if with_covid: calculate_size_of_population_in_next_step(with_covid, t)
     calculate_size_of_population_in_next_step(with_covid, t)
 
 # %%
@@ -335,12 +335,10 @@ def calculate_size_of_population_in_next_step(with_covid: bool, t: int):
     and deaths are incorporated into each age group.
     """
     population_mtx = state.POPULATION if with_covid else state.NO_COVID_POPULATION
-    birth_mtx = state.BIRTH_MATRIX if with_covid else state.NO_COVID_BIRTHS
-    death_mtx = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
-    is_not_the_first_monday_of_september = not ((state.WEEKLY_CASES_FILLED.index[t].month == 9) &
-                                    (state.WEEKLY_CASES_FILLED.index[t].day <= 7))
-    if (t <= state.NR_TIMESTEPS - 1) & is_not_the_first_monday_of_september:
-        population_mtx[:, t] = population_mtx[:, t - 1] + birth_mtx[:, t - 1] - death_mtx[:, t - 1]
+    prev_population = get_prev_step(t, population_mtx, state.SUSCEPIBLE_AGING_MTX)
+    birth = state.BIRTH_MATRIX[:, t - 1] if with_covid else state.NO_COVID_BIRTHS[:, t - 1]
+    death = state.DEATHS_MATRIX[:, t - 1] if with_covid else state.NO_COVID_DEATHS[:, t - 1]
+    population_mtx[:, t] = prev_population + birth - death
 
 # %%
 def calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario: Scenario, with_covid: bool, t: int):
@@ -360,33 +358,20 @@ def calculate_number_of_susceptible_cases_in_next_step_in_baseline(scenario: Sce
     effectively_vaccinated_v1 = scenario.V1[:, t-1] * GlobalConfig.V1_EFFICACY
     effectively_vaccinated_v2 = scenario.V2[:, t-1] * GlobalConfig.V2_EFFICACY
     effectively_vaccinated = effectively_vaccinated_v1 + effectively_vaccinated_v2
-    cases_matrix = state.CASES_MATRIX[:, t-1] if with_covid else state.MEAN_I[:, t-1]
+    cases_mtx = state.CASES_MATRIX if with_covid else state.MEAN_I
+    prev_cases = get_prev_step(t, cases_mtx, state.INFECTIOUS_AGING_MTX)
     births = state.BIRTH_MATRIX[:, t-1] if with_covid else state.NO_COVID_BIRTHS[:,t-1]
     deaths = state.DEATHS_MATRIX[:, t-1] if with_covid else state.NO_COVID_DEATHS[:,t-1]
-    population = state.POPULATION[:, t - 1] if with_covid else state.NO_COVID_POPULATION[:, t - 1]
-    demographic_changes = (births - deaths * (scenario.S[:, t-1] / population))
-    scenario.S[:, t] = (scenario.S[:, t - 1] - cases_matrix - effectively_vaccinated + demographic_changes)
+    population = state.POPULATION if with_covid else state.NO_COVID_POPULATION
+    prev_population = get_prev_step(t, population, state.SUSCEPIBLE_AGING_MTX)
+    prev_s = get_prev_step(t, scenario.S, state.SUSCEPIBLE_AGING_MTX)
+    demographic_changes = (births - deaths * (prev_s / prev_population))
+    scenario.S[:, t] = (prev_s - prev_cases - effectively_vaccinated + demographic_changes)
 
 # %% [markdown]
 # We use realistic age‑structured models in which individuals shift to the next age group at fixed periodic points in time, with no intermediate transfers between age groups. The timing for age shift is set to the first Monday of September in each year.
 #
 # This function updates the compartments at time $t$ if it is the first Monday of September according to the above described aging process.
-
-# %%
-def update_scenario_when_aging(scenario: Scenario, t: int, baseline: bool, with_covid: bool):
-    """
-    Apply aging transitions at week t if it is the annual aging week.
-
-    Notes
-    -----
-    Aging redistributes individuals between age groups and ensures
-    demographic consistency. Baseline scenarios also update population.
-    """
-    if is_time_for_aging(t):
-        if baseline:
-            handle_aging_baseline(scenario.S, t, with_covid)
-        else:
-            handle_aging(scenario.S, scenario.I, t)
 
 # %%
 def is_time_for_aging(t: int) -> bool:
@@ -401,67 +386,6 @@ def is_time_for_aging(t: int) -> bool:
                                     (state.WEEKLY_CASES_FILLED.index[t].day <= 7))
     return (t <= state.NR_TIMESTEPS - 1) & is_first_monday_of_september
 
-
-# %%
-def handle_aging(s_scen: np.ndarray, i_scen: np.ndarray, t: int, with_covid: bool):
-    """Apply aging transitions to susceptible and infectious counts."""
-    handle_aging_of_susceptible_cases(s_scen, t, False, with_covid)
-    handle_aging_of_infectious_cases(i_scen, t)
-
-# %%
-def handle_aging_baseline(s_scen: np.ndarray, t: int, with_covid: bool):
-    """Apply aging transitions and update population for baseline scenarios."""
-    handle_aging_of_susceptible_cases(s_scen, t, True, with_covid)
-    #if with_covid: handle_aging_of_population(with_covid, t)
-    handle_aging_of_population(with_covid, t)
-
-# %% [markdown]
-# This function updates the total population at time $t$ (if it is the first Monday of September) according to the above described aging process.
-# In the age groups 10–14, 15–19, and 20+, only a fraction of individuals moves to the next age group. Specifically, we assume that one fifth advances, whereas four fifths remain in the same age group.
-
-# %%
-def handle_aging_of_population(with_covid: bool, t: int):
-    """Redistribute population between age groups according to demographic rules."""
-    A = state.NR_AGE_GROUPS
-    population = state.POPULATION if with_covid else state.NO_COVID_POPULATION
-    demographic_changes = state.BIRTH_MATRIX[:, t-1] - state.DEATHS_MATRIX[:, t-1]
-    # age group 20+
-    population[A - 1, t] = population[A - 1, t - 1] + population[A - 2, t - 1] / 5 + demographic_changes[A - 1]
-    # age group 15-19
-    population[A - 2, t] = population[A - 2, t - 1] * 4 / 5 + population[A - 3, t - 1] / 5 + demographic_changes[A - 2]
-    # age group 10-14
-    population[A - 3, t] = population[A - 3, t - 1] * 4 / 5 + population[A - 4, t - 1] + demographic_changes[A - 3]
-    # age groups 1-9
-    for a in range(A - 4, 0, -1):
-        population[a, t] = population[a - 1, t - 1] + demographic_changes[a]
-    population[0, t] = 0 + demographic_changes[0]
-
-# %% [markdown]
-# This function updates the susceptible compartments at time $t$ (if it is the first Monday of September) according to the above described aging process.
-# In the age groups 10–14, 15–19, and 20+, only a fraction of individuals moves to the next age group. Specifically, we assume that one fifth advances, whereas four fifths remain in the same age group.
-#
-# If the calculation is performed for the baseline scenario, births and deaths are also taken into account by this function. In counterfactual scenarios, births and deaths are incorporated only when computing the number of susceptible individuals for the next timestep in the function _calculate_nr_of_susceptible_cases_in_next_step_for_scenario_.
-
-# %%
-def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool, with_covid: bool):
-    """Redistribute susceptible individuals between age groups during aging."""
-    A = state.NR_AGE_GROUPS
-    birth_mtx = state.BIRTH_MATRIX if with_covid else state.NO_COVID_BIRTHS
-    death_matrix = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
-    # age group 20+
-    s_scen[A - 1, t] = s_scen[A - 1, t] + s_scen[A - 2, t] / 5
-    # age group 15-19
-    s_scen[A - 2, t] = s_scen[A - 2, t] * 4 / 5 + s_scen[A - 3, t] / 5
-    # age group 10-14
-    s_scen[A - 3, t] = s_scen[A - 3, t] * 4 / 5 + s_scen[A - 4, t]
-    # age groups 1-9
-    for a in range(A - 4, 0, -1):
-        s_scen[a, t] = s_scen[a - 1, t]
-    if baseline:
-        s_scen[0,t] = birth_mtx[0,t-1]-death_matrix[0,t-1]
-    else :
-        s_scen[0, t] = 1
-
 # %% [markdown]
 # This function updates the infectious compartments at time $t$ (if it is the first Monday of September) according to the above described aging process. In the age groups 10–14, 15–19, and 20+, only a fraction of individuals moves to the next age group. Specifically, we assume that one tithe advances, whereas nine tithe remain in the same age group.
 
@@ -469,16 +393,17 @@ def handle_aging_of_susceptible_cases(s_scen: np.ndarray, t: int, baseline: bool
 def handle_aging_of_infectious_cases(i_scen: np.ndarray, t: int):
     """Reset infectious counts for the youngest age group during aging."""
     A = state.NR_AGE_GROUPS
+    q: float = 0.2
     # age group 20+
-    i_scen[A - 1, t] = i_scen[A - 1, t] + i_scen[A - 2, t] / 10
+    i_scen[A - 1, t] = i_scen[A - 1, t] + i_scen[A - 2, t] * q
     # age group 15-19
-    i_scen[A - 2, t] = i_scen[A - 2, t] * 9 / 10 + i_scen[A - 3, t] / 10
+    i_scen[A - 2, t] = i_scen[A - 2, t] * (1-q) + i_scen[A - 3, t] * q
     # age group 10-14
-    i_scen[A - 3, t] = i_scen[A - 3, t] * 9 / 10 + i_scen[A - 4, t]
+    i_scen[A - 3, t] = i_scen[A - 3, t] * (1-q) + i_scen[A - 4, t]
     # age groups 1-9
     for a in range(A - 4, 0, -1):
         i_scen[a, t] = i_scen[a - 1, t]
-    i_scen[0, t] = 0
+    i_scen[0, t] = 1
 
 # %% [markdown]
 # As mentioned above, the expression
@@ -508,7 +433,14 @@ def calculate_denominator(i_scen: np.ndarray, with_covid: bool, t: int) -> np.nd
     mu_t = (death_mtx[:, t] / population_mtx[:, t]).reshape(1, -1)  # shape: (1,A)
     tau = np.arange(1, GlobalConfig.MAX_TAU + 1)  # shape: (A,1)
     kernel = G.reshape(-1, 1) * np.exp(-mu_t * tau.reshape(-1, 1))
-    return np.sum(i_scen[:,t-tau] * kernel.T, axis=1) @ cm
+    infectious = i_scen[:, t - tau].copy()
+    aging_mask = is_time_for_aging(t - tau)
+    if np.any(aging_mask):
+        infectious[:, aging_mask] = (
+                state.INFECTIOUS_AGING_MTX
+                @ infectious[:, aging_mask]
+        )
+    return np.sum(infectious * kernel.T, axis=1) @ cm
 
 # %% [markdown]
 # Contact matrix is taken from https://github.com/zsvizi/covid19hun (published in Röst, G., Bartha, F. A., Bogya, N., Boldog, P., Dénes, A., Ferenci, T., Horváth, K. J., Juhász, A., Nagy, C., Tekeli, T., Vizi, Z., & Oroszi, B. (2020). Early Phase of the COVID-19 Outbreak in Hungary and Post-Lockdown Scenarios. Viruses, 12(7), 708. https://doi.org/10.3390/v12070708 ).
@@ -527,9 +459,10 @@ def calculate_symmetrized_contact_matrix(with_covid: bool, t: int) -> np.ndarray
     """
     ## the size of the age groups at the previous week as a column vector
     population = state.POPULATION if with_covid else state.NO_COVID_POPULATION
-    population_i = population[:, t - 1].reshape(-1,1)
+    prev_population = get_prev_step(t, population, state.SUSCEPIBLE_AGING_MTX)
+    population_i = prev_population.reshape(-1,1)
     ## the size of the age groups at the previous week as a row vector
-    population_j = population[:, t - 1].reshape(1,-1)
+    population_j = prev_population.reshape(1,-1)
     return (state.CONTACTS0 * population_i + state.CONTACTS0.T * population_j) / (2 * population_i)
 
 # %%
@@ -549,7 +482,10 @@ def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenar
     birth_mtx: np.ndarray[float] = state.BIRTH_MATRIX if with_covid else state.NO_COVID_BIRTHS
     death_mtx: np.ndarray[float] = state.DEATHS_MATRIX if with_covid else state.NO_COVID_DEATHS
     population_mtx: np.ndarray[float] = state.POPULATION if with_covid else state.NO_COVID_POPULATION
-    demographic_changes = (birth_mtx[:,t-1] - death_mtx[:,t-1] * (scenario.S[:,t-1] / population_mtx[:,t-1]))
+    prev_population = get_prev_step(t, population_mtx, state.SUSCEPIBLE_AGING_MTX)
+    prev_s = get_prev_step(t, scenario.S, state.SUSCEPIBLE_AGING_MTX)
+    prev_i = get_prev_step(t, scenario.I, state.INFECTIOUS_AGING_MTX)
+    demographic_changes = (birth_mtx[:,t-1] - death_mtx[:,t-1] * (prev_s / prev_population))
 
     is_baseline_used: bool =((start_of_vaccination < GlobalConfig.START_OF_VACCINATION) & (
                 state.WEEKLY_CASES_FILLED.index[t] < start_of_vaccination)) \
@@ -559,7 +495,7 @@ def calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario: Scenar
     if is_baseline_used:
         s_scen = state.BASELINE_SCENARIO.S[:, t]
     else:
-        s_scen = scenario.S[:, t-1] - scenario.I[:, t-1] - effectively_vaccinated + demographic_changes
+        s_scen = prev_s - prev_i - effectively_vaccinated + demographic_changes
 
     return s_scen
 
@@ -590,14 +526,8 @@ def calculate_next_step_for_scenario(scenario: Scenario, with_covid: bool, start
     Updates susceptible counts, applies aging, and computes new
     infectious incidences for week t.
     """
-    is_next_step_calculated: bool = ((start_of_vaccination <= GlobalConfig.START_OF_VACCINATION) & (
-                state.WEEKLY_CASES_FILLED.index[t] >= start_of_vaccination)) \
-                              | ((start_of_vaccination > GlobalConfig.START_OF_VACCINATION) & (
-                state.WEEKLY_CASES_FILLED.index[t] >= GlobalConfig.START_OF_VACCINATION))
     scenario.S[:, t] = calculate_nr_of_susceptible_cases_in_next_step_for_scenario(scenario, with_covid, start_of_vaccination, t)
-    if is_time_for_aging(t) & is_next_step_calculated: handle_aging_of_susceptible_cases(scenario.S, t, False, with_covid)
     scenario.I[:, t] = calculate_nr_of_infectious_incidences_in_next_step_for_scenario(scenario, with_covid, t)
-    if is_time_for_aging(t) : handle_aging_of_infectious_cases(scenario.I, t)
 
 # %% [markdown]
 # This function calculates the number of individuals vaccinated with one dose in counterfactual scenarios where the vaccination against varicella has been part of the routine immunization program earlier than in the actual baseline scenario (**start_of_vaccination**) with vaccination level relative to the actual implemented scenario (**vacc_level**). In this case, the number of individuals vaccinated with one dose is based on the number of births 13 months before $t$ assuming that 99% of the infants would get vaccinated at most before 01/09/2019 (the actual start of vaccination) and the actual number of vaccinated individuals after 01/09/2019. That is:
@@ -627,7 +557,7 @@ def calculate_the_number_of_vaccinated_individuals_with_negative_offset(
         print("number of vaccinated individuals can not be calculated before " + str(state.WEEKLY_INDEX[0] + pd.DateOffset(months=13)))
     # Filling
     for date in state.WEEKLY_INDEX:
-        if (date < start_of_vaccination) or (date + pd.DateOffset(months=-13) < pd.Timestamp(2005,1,3)):
+        if (date <= start_of_vaccination) or (date + pd.DateOffset(months=-13) < pd.Timestamp(2005,1,3)):
             v1_weekly.loc[date] = 0
         elif date < GlobalConfig.START_OF_VACCINATION:
             v1_weekly.loc[date] = state.WEEKLY_BIRTH_SERIES.asof(date + pd.DateOffset(months=-13)) * 0.99 * vacc_level
@@ -690,22 +620,22 @@ def estimate_rt_during_covid(data: np.ndarray[float], index: pd.Series) -> np.nd
     df: pd.DataFrame = pd.DataFrame(data.T, index=index, columns=state.AGE_GROUPS)
     timerange_for_mean = ((df.index > GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=-5))
                          & (df.index < GlobalConfig.START_OF_VACCINATION))
-    q_pre = df.loc[timerange_for_mean]   # q: DataFrame, oszlopok: korcsoportok
-    mu = q_pre.mean()   # minden korcsoport átlagos q-ja
+    q_pre = df.loc[timerange_for_mean]   # q: DataFrame, columns: age groups
+    mu = q_pre.mean()   # the mean of all age groups
     weeks_pre = q_pre.index.isocalendar().week
-    seasonal = q_pre.groupby(weeks_pre).mean()   # heti átlag korcsoportonként
-    seasonal = seasonal - mu                     # demeanelés
+    seasonal = q_pre.groupby(weeks_pre).mean()   # weekly mean per age group
+    seasonal = seasonal - mu                     # demeaning
 
     weeks_full = df.index.isocalendar().week
     q_nocovid = pd.DataFrame(index=df.index, columns=df.columns)
 
-    for col in df.columns:   # minden korcsoport
+    for col in df.columns:   # all age groups
         q_nocovid[col] = mu[col] + seasonal[col].reindex(weeks_full).values
 
     covid_mask = (df.index >= pd.Timestamp("2020-03-16")) & (df.index <= pd.Timestamp("2025-09-01"))
 
-    q_final = df.copy()   # valódi adatok
-    q_final.loc[covid_mask] = q_nocovid.loc[covid_mask]*0.9   # csak COVID alatt becslés
+    q_final = df.copy()   # real data
+    q_final.loc[covid_mask] = q_nocovid.loc[covid_mask]*0.9   # estimation (only) during COVID
 
     return q_final.values.T
 
@@ -713,22 +643,14 @@ def calculate_mean_during_covid(data: np.ndarray[float], index: pd.Series) -> np
     df: pd.DataFrame = pd.DataFrame(data.T, index=index, columns=state.AGE_GROUPS)
     timerange_for_mean = ((df.index > GlobalConfig.START_OF_VACCINATION + pd.DateOffset(years=-5))
                          & (df.index < GlobalConfig.START_OF_VACCINATION))
-    #timerange_for_mean = (((df.index > pd.Timestamp(2019,1,1) + pd.DateOffset(years=-2)) & (df.index < pd.Timestamp(2019,1,1))) |
-    #                      ((df.index > pd.Timestamp("2020-03-16")) & (df.index < pd.Timestamp("2020-03-16") + pd.DateOffset(years=2))))
     df_sub = df[timerange_for_mean].copy()
-    # év távolsága a jelenhez képest
     current_year = df.index.max().year
     df_sub["weight"] = current_year - df_sub.index.year + 1
-    #weekly_weighted_mean = (df_sub.groupby(df_sub.index.isocalendar().week).apply(lambda g: np.average(g["value"], weights=g["weight"])))
 
 
     mean_data: pd.DataFrame = df[timerange_for_mean].groupby(df.index[timerange_for_mean].map(lambda i: i.week)).mean()
     no_cov_data: np.ndarray = np.zeros((len(state.AGE_GROUPS), len(state.WEEKLY_INDEX)))
-    min_t = len(state.WEEKLY_INDEX) - len(index)
-    max_t = len(state.WEEKLY_INDEX)
     for t in range(0, len(state.WEEKLY_INDEX)):
-    #for t in range(min_t, max_t):
-        #no_cov_data[:, t] = data[:, t - min_t]
         no_cov_data[:, t] = data[:, t]
         if (state.WEEKLY_INDEX[t] > pd.Timestamp("2020-03-16")) and (state.WEEKLY_INDEX[t] < pd.Timestamp("2025-09-01")):
             week_of_year: int = state.WEEKLY_INDEX[t].week
@@ -737,3 +659,8 @@ def calculate_mean_during_covid(data: np.ndarray[float], index: pd.Series) -> np
             else:
                 no_cov_data[:, t] = mean_data.loc[week_of_year][:]
     return no_cov_data
+
+def get_prev_step(t: int, data: np.ndarray[float], aging_matrix: np.ndarray[float]) -> np.ndarray[float]:
+    aging_corrector_vector: np.ndarray[float] = np.zeros(state.NR_AGE_GROUPS)
+    aging_corrector_vector[0] = 1
+    return aging_matrix @ data[:, t - 1] + aging_corrector_vector if is_time_for_aging(t - 1) else data[:, t - 1]

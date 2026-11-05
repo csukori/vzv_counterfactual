@@ -104,6 +104,9 @@ AGE_GROUPS: np.ndarray[str] | None = None
 NR_AGE_GROUPS: int | None = None
 YEARS: np.ndarray[int] | None = None
 NR_TIMESTEPS: int | None = None
+AGE_GROUP_WIDTHS: list[float] | None = None
+INFECTIOUS_AGING_MTX: np.ndarray[float] | None = None
+SUSCEPIBLE_AGING_MTX: np.ndarray[float] | None = None
 
 # Masks for specific time periods used in analysis.
 AFTER_2016_1_1_MASK: np.ndarray[bool] | None = None
@@ -121,9 +124,12 @@ MEAN_I_SCENARIO: Scenario | None = None
 
 def set_age_groups_and_nr_age_groups(age_groups):
     """Store the list of age groups and compute the number of age groups."""
-    global AGE_GROUPS, NR_AGE_GROUPS
+    global AGE_GROUPS, NR_AGE_GROUPS, AGE_GROUP_WIDTHS, INFECTIOUS_AGING_MTX, SUSCEPIBLE_AGING_MTX
     AGE_GROUPS = age_groups
     NR_AGE_GROUPS = len(age_groups)
+    AGE_GROUP_WIDTHS = create_age_group_widths(AGE_GROUPS)
+    INFECTIOUS_AGING_MTX = create_aging_matrix(2)
+    SUSCEPIBLE_AGING_MTX = create_aging_matrix(1)
 
 def set_years(years):
     global YEARS
@@ -338,3 +344,53 @@ def set_mean_remainders(mean_remainders):
 def set_mean_i_scenario(mean_i_scenario):
     global MEAN_I_SCENARIO
     MEAN_I_SCENARIO = mean_i_scenario
+
+def create_age_group_widths(age_groups: np.ndarray) -> list[float]:
+    widths = []
+
+    for age_group in age_groups:
+
+        if "+" in age_group:
+            widths.append(np.inf)
+
+        elif "-" in age_group:
+            start, end = age_group.split("-")
+            widths.append(int(end) - int(start) + 1)
+
+        else:
+            widths.append(1)
+
+    return widths
+
+def create_aging_matrix(factor: float) -> np.ndarray:
+    n = len(AGE_GROUP_WIDTHS)
+    aging_mtx = np.zeros((n, n))
+
+    for i in range(n):
+
+        # last (open) age group
+        if i == n - 1:
+            aging_mtx[i, i] = 1.0
+
+            prev_width = AGE_GROUP_WIDTHS[i - 1]
+            if np.isfinite(prev_width):
+                aging_mtx[i, i - 1] = 1 / prev_width
+
+            continue
+
+        width = AGE_GROUP_WIDTHS[i]
+
+        # 1 year long age groups
+        if width == 1:
+            aging_mtx[i + 1, i] = 1.0
+
+        # multi-year age groups
+        else:
+            width = width * factor
+            stay = (width - 1) / width
+            leave = 1 / width
+
+            aging_mtx[i, i] = stay
+            aging_mtx[i + 1, i] = leave
+
+    return aging_mtx

@@ -70,14 +70,17 @@ class Scenario:
         - annual_i_series : total infections per year
         """
         self.name = scenario_name
-        fields = ["S", "I", "V1", "V2"]
-        for field in fields:
+        self.init_array_fields(**kwargs)
+        if state.AGE_STRUCTURED_DATA_INDEX is not None: self.compute_i_series(state.AGE_STRUCTURED_DATA_INDEX)
+
+    def init_array_fields(self, **kwargs):
+        array_fields = ["S", "I", "V1", "V2"]
+        for field in array_fields:
             value = kwargs.get(field, None)
             if value is None:
                 setattr(self, field, np.zeros((state.NR_AGE_GROUPS, state.NR_TIMESTEPS)))
             else:
                 setattr(self, field, value)
-        if state.AGE_STRUCTURED_DATA_INDEX is not None: self.compute_i_series(state.AGE_STRUCTURED_DATA_INDEX)
 
     def compute_i_series(self, index: pd.DatetimeIndex):
         """
